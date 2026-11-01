@@ -1,0 +1,16 @@
+###################################################################################################
+# mod-playerbots configuration
+#
+# Copy this file to playerbots.conf next to worldserver.conf to change a value: the .dist file
+# is read first (defaults), then playerbots.conf over it. ".reload config" reads both again.
+###################################################################################################
+
+[worldserver]
+
+#
+#    Playerbots.Enable
+#        Master switch for the playerbots module.
+#        Default: 0 - (Disabled)
+#                 1 - (Enabled)
+
+Playerbots.Enable = 0
