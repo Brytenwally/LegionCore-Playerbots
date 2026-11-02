@@ -55,7 +55,9 @@ private:
     ObjectGuid _master;
     uint32 _accountId;
     bool _stay = false;                                     // "stay" order: hold position until "follow"
-    ObjectGuid _answeredInvite;                             // the group invite already answered
+    // the group invite already answered: the group itself, not its guid, since a group being created by the
+    // invite has no guid until someone accepts (an empty guid matched "nothing answered yet")
+    void const* _answeredInvite = nullptr;
     ObjectGuid _followGuid;                                 // who the current follow movement targets
     uint32 _followTimer = 0;
 };

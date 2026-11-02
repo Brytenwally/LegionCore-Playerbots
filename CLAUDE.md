@@ -69,7 +69,9 @@ come first.
 - Group invite: answered with a queued `CMSG_PARTY_INVITE_RESPONSE` (int8 PartyIndex, bit
   Accept, bit HasRolesDesired) so the core's `AcceptPartyInvite` does the joining. Accepted
   from the master, declined from anyone else. Once per invite (`_answeredInvite`, cleared when
-  no invite is pending).
+  no invite is pending), remembered by the `Group*` itself: an invite that creates a group gives
+  a pending group with an **empty guid** until someone accepts (`HandlePartyInvite` ->
+  `AddLeaderInvite`), so remembering by guid ignored every such invite (owner hit it 2026-11-02).
 - Follow: every 500 ms, out of `stay`, in a group, alive: `MoveFollow(target, 2 yd, behind)`
   where target = master if in the group, else the group leader, same map only. Not yet: combat,
   mounts, following across maps (summon), formations.

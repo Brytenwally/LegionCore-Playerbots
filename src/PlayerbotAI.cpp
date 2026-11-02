@@ -60,13 +60,13 @@ void PlayerbotAI::HandleGroupInvite(Player* bot)
     Group* invite = bot->GetGroupInvite();
     if (!invite)
     {
-        _answeredInvite.Clear();                            // a later invite of the same group is a new one
+        _answeredInvite = nullptr;                          // a later invite of the same group is a new one
         return;
     }
-    if (invite->GetGUID() == _answeredInvite)
+    if (invite == _answeredInvite)
         return;
 
-    _answeredInvite = invite->GetGUID();
+    _answeredInvite = invite;
     ObjectGuid const leader = invite->GetLeaderGUID();
     bool const accept = IsMaster(leader, ObjectMgr::GetPlayerAccountIdByGUID(leader));
 
