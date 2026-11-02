@@ -18,6 +18,14 @@ is read there and rewritten for Legion here.
 - Commit and push straight to **`main`**. No feature branches or PRs unless the owner asks.
 - Imperative subject, body explaining what and why. No model names in commits.
 
+## Owner's priority
+
+Random bots' open-world activity (questing on their own, level-appropriate zones, grinding,
+wandering) is the **absolute last priority**: plan step 7 in the core's `CLAUDE.md`. When
+porting from SkyFire-playerbots, leave its random-bot open-world systems (quest/grind
+strategies, zone travel, random bot pool behaviour) for last; bots the player adds and leads
+come first.
+
 ## How the module plugs into the core
 
 - The core builds `modules/<folder>/src` as a script module; the loader is
