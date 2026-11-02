@@ -220,6 +220,16 @@ std::shared_ptr<PlayerbotAI> PlayerbotMgr::GetAI(ObjectGuid const& bot) const
     return itr != _ais.end() ? itr->second : nullptr;
 }
 
+std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> PlayerbotMgr::GetBotsOwnedBy(ObjectGuid const& player, uint32 accountId) const
+{
+    std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> owned;
+    std::lock_guard<std::mutex> lock(_aiLock);
+    for (auto const& pair : _ais)
+        if (pair.first != player && pair.second->IsMaster(player, accountId))
+            owned.emplace_back(pair.first, pair.second);
+    return owned;
+}
+
 void PlayerbotMgr::OnPlayerLogout(uint32 accountId)
 {
     std::lock_guard<std::mutex> lock(_logoutLock);

@@ -1,9 +1,10 @@
 /*
  * mod-playerbots: per-bot AI.
  *
- * Plan step 3, first piece: a bot answers group invites, follows its group, and takes whispered
- * orders. Everything here runs on the bot's own map thread (PlayerScript::OnUpdate / OnChat from
- * the same map), so the bot's Player may be used freely.
+ * Plan step 3, first piece: a bot answers group invites, follows its group, and takes orders from
+ * its owner by whisper or party chat. Everything here runs on the bot's own map thread
+ * (PlayerScript::OnUpdate, or an order posted there with ObjectAccessor::PostToPlayer), so the
+ * bot's Player may be used freely; the sender of an order is known by guid only.
  */
 
 #ifndef MOD_PLAYERBOTS_PLAYERBOTAI_H
@@ -22,16 +23,22 @@ public:
     PlayerbotAI(ObjectGuid const& master, uint32 accountId) : _master(master), _accountId(accountId) { }
 
     void Update(Player* bot, uint32 diff);
-    // a whisper from sender, who stands on the bot's map
-    void HandleWhisper(Player* bot, Player* sender, std::string const& text);
+    // a whisper to the bot, from anywhere; only its owner is obeyed
+    void HandleWhisper(Player* bot, ObjectGuid const& sender, uint32 senderAccount, std::string const& text);
+    // party/raid chat of the group `group`; only the owner's known orders are acted on, other talk is ignored
+    void HandlePartyChat(Player* bot, ObjectGuid const& sender, uint32 senderAccount, ObjectGuid const& group, std::string const& text);
+
+    // the bot's owner: its master (who added it), or a player of the bot's own account (its alts' player).
+    // Reads only constant members: safe from any thread.
+    bool IsMaster(ObjectGuid const& guid, uint32 accountId) const;
 
 private:
-    // who may lead the bot: its master, or a player of the bot's own account (its alts' player)
-    bool IsMaster(ObjectGuid const& guid, uint32 accountId) const;
+    // carries out a known order and confirms it to the sender; false for an unknown order
+    bool HandleOrder(Player* bot, ObjectGuid const& sender, std::string const& text);
     void HandleGroupInvite(Player* bot);
     void UpdateFollow(Player* bot);
     void StopFollowing(Player* bot);
-    void Say(Player* bot, Player* to, std::string const& text);
+    void Say(Player* bot, ObjectGuid const& to, std::string const& text);
 
     ObjectGuid _master;
     uint32 _accountId;

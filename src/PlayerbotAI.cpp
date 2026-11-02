@@ -118,11 +118,30 @@ void PlayerbotAI::StopFollowing(Player* bot)
     bot->GetMotionMaster()->MoveIdle();
 }
 
-void PlayerbotAI::HandleWhisper(Player* bot, Player* sender, std::string const& text)
+void PlayerbotAI::HandleWhisper(Player* bot, ObjectGuid const& sender, uint32 senderAccount, std::string const& text)
 {
-    if (!IsMaster(sender->GetGUID(), sender->GetSession()->GetAccountId()))
+    if (!IsMaster(sender, senderAccount))
         return;
 
+    if (!HandleOrder(bot, sender, text))
+        Say(bot, sender, "Orders I know: follow, stay.");
+}
+
+void PlayerbotAI::HandlePartyChat(Player* bot, ObjectGuid const& sender, uint32 senderAccount, ObjectGuid const& group, std::string const& text)
+{
+    if (!IsMaster(sender, senderAccount))
+        return;
+
+    // the bot may have left that group since the message was sent
+    Group* botGroup = bot->GetGroup();
+    if (!botGroup || botGroup->GetGUID() != group)
+        return;
+
+    HandleOrder(bot, sender, text);
+}
+
+bool PlayerbotAI::HandleOrder(Player* bot, ObjectGuid const& sender, std::string const& text)
+{
     std::string const order = Lower(text);
     if (order == "follow")
     {
@@ -130,20 +149,24 @@ void PlayerbotAI::HandleWhisper(Player* bot, Player* sender, std::string const& 
         _followGuid.Clear();                                // follow again at the next check
         _followTimer = FollowCheckInterval;
         Say(bot, sender, bot->GetGroup() ? "Following." : "Following once I am in your group.");
+        return true;
     }
-    else if (order == "stay")
+
+    if (order == "stay")
     {
         _stay = true;
         _followGuid.Clear();
         bot->GetMotionMaster()->Clear();
         bot->GetMotionMaster()->MoveIdle();
         Say(bot, sender, "Staying here.");
+        return true;
     }
-    else
-        Say(bot, sender, "Orders I know: follow, stay.");
+
+    return false;
 }
 
-void PlayerbotAI::Say(Player* bot, Player* to, std::string const& text)
+void PlayerbotAI::Say(Player* bot, ObjectGuid const& to, std::string const& text)
 {
-    bot->Whisper(text, LANG_UNIVERSAL, to->GetGUID());
+    // Player::Whisper by guid reaches the receiver wherever he stands
+    bot->Whisper(text, LANG_UNIVERSAL, to);
 }

@@ -45,6 +45,8 @@ public:
 
     // the bot's AI, from any thread (the AI itself is used on the bot's own map thread only)
     std::shared_ptr<PlayerbotAI> GetAI(ObjectGuid const& bot) const;
+    // the bots this player owns (PlayerbotAI::IsMaster), from any thread
+    std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> GetBotsOwnedBy(ObjectGuid const& player, uint32 accountId) const;
 
     // World thread, every world update.
     void Update(uint32 diff);

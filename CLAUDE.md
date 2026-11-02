@@ -61,8 +61,9 @@ come first.
 
 - `PlayerbotAI` (`src/PlayerbotAI.*`), one per bot, created by `PlayerbotMgr::Update` when the bot
   is in the world (`_ais`, mutex: written on the world thread, read from map threads via
-  `GetAI`). Driven by `PlayerScript::OnUpdate` (bot's map thread) and `OnChat` whispers (only
-  when the bot stands on the sender's map: the core gives no receiver otherwise).
+  `GetAI`). Driven by `PlayerScript::OnUpdate` (bot's map thread); orders arrive from the
+  sender's thread and are posted to the bot's (`ObjectAccessor::PostToPlayer`), so the AI only
+  ever touches its bot on the bot's thread and knows the sender by guid + account.
 - Master = the player who added the bot (`.playerbots add`); "master" checks also accept any
   player of the bot's own account (`IsMaster`).
 - Group invite: answered with a queued `CMSG_PARTY_INVITE_RESPONSE` (int8 PartyIndex, bit
@@ -72,7 +73,13 @@ come first.
 - Follow: every 500 ms, out of `stay`, in a group, alive: `MoveFollow(target, 2 yd, behind)`
   where target = master if in the group, else the group leader, same map only. Not yet: combat,
   mounts, following across maps (summon), formations.
-- Whisper orders (master only): `follow`, `stay`; anything else gets the list of orders.
+- Orders, from the **owner only** (owner's rule, 2026-11-02; owner = `IsMaster`: the master or
+  a player of the bot's account): `follow`, `stay`.
+  - Whisper: core hook `PlayerScript::OnWhisper` (receiver guid, any map). Unknown text gets
+    the list of orders.
+  - Party / raid / instance chat (`OnChat(..., Group*)`): sent to the sender's own bots
+    (`PlayerbotMgr::GetBotsOwnedBy`); each bot checks on its thread that it is in that group.
+    Unknown text is ignored (it is normal party talk). Replies go by whisper to the owner.
 
 ## Status
 
@@ -82,8 +89,9 @@ come first.
 - 2026-11-02: bot lifecycle (see above) on the core's bot sessions. **Verified on the owner's
   server** (build #5, core `b1befd3` + `c77aa64`): add, alt bot beside its player, summon, far
   teleport, list, logout with the account's player. 
-- 2026-11-02: step 3 started: group invite, follow, whisper follow/stay (see "Bot AI"). Compiles
-  on Linux; Windows build and runtime test pending.
+- 2026-11-02: step 3 started: group invite, follow, follow/stay orders by whisper (any map) and
+  party chat, owner only (see "Bot AI"). Compiles on Linux; Windows build and runtime test
+  pending.
 
 ## Checking
 

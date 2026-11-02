@@ -9,6 +9,8 @@
 #include "Chat.h"
 #include "Config.h"
 #include "Log.h"
+#include "Group.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
@@ -57,14 +59,58 @@ public:
             ai->Update(player, diff);
     }
 
-    // whispered orders; the core passes the receiver only when he stands on the sender's map (same thread)
-    void OnChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Player* receiver) override
+    // whispered orders: the hook runs in the sender's thread, the order is carried out in the bot's
+    void OnWhisper(Player* sender, ObjectGuid const& receiver, uint32 /*lang*/, std::string const& msg) override
     {
-        if (type != CHAT_MSG_WHISPER || !receiver || !receiver->GetSession() || !receiver->GetSession()->IsBot())
+        WorldSession* session = sender->GetSession();
+        if (!session || session->IsBot())
             return;
 
-        if (std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(receiver->GetGUID()))
-            ai->HandleWhisper(receiver, player, msg);
+        std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(receiver);
+        if (!ai)
+            return;
+
+        ObjectGuid const senderGuid = sender->GetGUID();
+        uint32 const senderAccount = session->GetAccountId();
+        ObjectAccessor::PostToPlayer(receiver, [ai, senderGuid, senderAccount, msg](Player* bot) -> void
+        {
+            ai->HandleWhisper(bot, senderGuid, senderAccount, msg);
+        });
+    }
+
+    // party, raid and instance chat: orders reach the sender's own bots only, each checks in its own thread
+    // that it is still in that group
+    void OnChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Group* group) override
+    {
+        switch (type)
+        {
+            case CHAT_MSG_PARTY:
+            case CHAT_MSG_PARTY_LEADER:
+            case CHAT_MSG_RAID:
+            case CHAT_MSG_RAID_LEADER:
+            case CHAT_MSG_INSTANCE_CHAT:
+            case CHAT_MSG_INSTANCE_CHAT_LEADER:
+                break;
+            default:
+                return;
+        }
+
+        WorldSession* session = player->GetSession();
+        if (!group || !session || session->IsBot())
+            return;
+
+        ObjectGuid const senderGuid = player->GetGUID();
+        uint32 const senderAccount = session->GetAccountId();
+        ObjectGuid const groupGuid = group->GetGUID();
+        std::string const text = msg;
+        for (auto const& owned : sPlayerbotMgr->GetBotsOwnedBy(senderGuid, senderAccount))
+        {
+            std::shared_ptr<PlayerbotAI> ai = owned.second;
+            ObjectAccessor::PostToPlayer(owned.first, [ai, senderGuid, senderAccount, groupGuid, text](Player* bot) -> void
+            {
+                ai->HandlePartyChat(bot, senderGuid, senderAccount, groupGuid, text);
+            });
+        }
     }
 
     void OnLogout(Player* player) override
