@@ -39,7 +39,7 @@ come first.
   macros on this core, not SkyFire's `SF_LOG_*`).
 - SQL: the core's updater does not run module SQL; create tables from code at startup.
 
-## Bot lifecycle (plan step 2, 2026-11-02)
+## Bot lifecycle (plan step 2, done 2026-11-02)
 
 - Core API (LegionCore-Reforged `WorldSession`): `CreateBotSession(accountId, accountName,
   SEC_PLAYER, expansion, locale)` -> `WorldSessionPtr` (socketless, `IsBot()`, not in
@@ -63,8 +63,10 @@ come first.
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the
   Windows worldserver (LegionCore-Build run #3, which now includes this module by default).
   Verified on the owner's server 2026-11-02: `[mod-playerbots] Module loaded (disabled)`. 
-- 2026-11-02: bot lifecycle (see above) on the core's bot sessions. Windows build #4 green
-  (core `c9fe307` + `7a365a8`); runtime test on the owner's server pending.
+- 2026-11-02: bot lifecycle (see above) on the core's bot sessions. **Verified on the owner's
+  server** (build #5, core `b1befd3` + `c77aa64`): add, alt bot beside its player, summon, far
+  teleport, list, logout with the account's player. Next: plan step 3 (port the SkyFire
+  skeleton: group, follow, whisper orders, strategy engine).
 
 ## Checking
 
