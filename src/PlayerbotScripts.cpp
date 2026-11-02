@@ -14,6 +14,7 @@
 #include "Player.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
+#include "QuestDef.h"
 #include "WorldSession.h"
 
 class playerbots_world : public WorldScript
@@ -113,11 +114,52 @@ public:
         }
     }
 
+    // quests: the owner's accepts and turn-ins are mirrored by his bots in his group
+    void OnQuestAccept(Player* player, Quest const* quest) override
+    {
+        ForOwnedBotsInGroup(player, quest, [](PlayerbotAI* ai, Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
+        {
+            ai->MirrorQuestAccept(bot, owner, group, questId);
+        });
+    }
+
+    void OnQuestReward(Player* player, Quest const* quest) override
+    {
+        ForOwnedBotsInGroup(player, quest, [](PlayerbotAI* ai, Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
+        {
+            ai->MirrorQuestReward(bot, owner, group, questId);
+        });
+    }
+
     void OnLogout(Player* player) override
     {
         if (WorldSession* session = player->GetSession())
             if (!session->IsBot())
                 sPlayerbotMgr->OnPlayerLogout(session->GetAccountId());
+    }
+
+private:
+    // runs action in the thread of each bot the player owns; each checks there that it is in his group.
+    // A bot's own quest accepts and turn-ins call the same hooks: they are not mirrored.
+    template<class Action>
+    static void ForOwnedBotsInGroup(Player* player, Quest const* quest, Action action)
+    {
+        WorldSession* session = player->GetSession();
+        Group* group = player->GetGroup();
+        if (!quest || !group || !session || session->IsBot())
+            return;
+
+        ObjectGuid const owner = player->GetGUID();
+        ObjectGuid const groupGuid = group->GetGUID();
+        uint32 const questId = quest->GetQuestId();
+        for (auto const& owned : sPlayerbotMgr->GetBotsOwnedBy(owner, session->GetAccountId()))
+        {
+            std::shared_ptr<PlayerbotAI> ai = owned.second;
+            ObjectAccessor::PostToPlayer(owned.first, [ai, action, owner, groupGuid, questId](Player* bot) -> void
+            {
+                action(ai.get(), bot, owner, groupGuid, questId);
+            });
+        }
     }
 };
 

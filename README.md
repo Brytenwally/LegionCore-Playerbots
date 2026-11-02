@@ -7,7 +7,7 @@ port of the AzerothCore playerbots.
 ## Status
 
 Bots log in and out, join your group, follow you and take whispered `follow` / `stay` orders.
-No combat yet. Needs
+Quests are shared with them. No combat yet. Needs
 LegionCore-Reforged with its bot session hooks (`WorldSession::CreateBotSession`).
 
 ## GM commands
@@ -31,6 +31,10 @@ When you log out, the bots of your account (your alts) log out with you.
 - **Orders**: `follow`, `stay`. Whisper them to a bot (wherever it is), or say them in party /
   raid chat to all your bots in the group at once. Bots only obey their owner: the player who
   added them, or a character of their own account. They confirm by whisper.
+- **Quests**: bots in your group take the quests you take, and turn a quest in when you do, even
+  if they did not finish its objectives themselves. They pick the best reward they can use. If
+  they can't take or turn in a quest (log full, level, previous quest, bags full, daily limit),
+  they whisper you why.
 
 ## Install
 

@@ -3,13 +3,17 @@
  */
 
 #include "PlayerbotAI.h"
+#include "DB2Stores.h"
 #include "Group.h"
+#include "ItemTemplate.h"
 #include "Log.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
 #include "Player.h"
+#include "QuestData.h"
+#include "QuestDef.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <algorithm>
@@ -169,4 +173,157 @@ void PlayerbotAI::Say(Player* bot, ObjectGuid const& to, std::string const& text
 {
     // Player::Whisper by guid reaches the receiver wherever he stands
     bot->Whisper(text, LANG_UNIVERSAL, to);
+}
+
+bool PlayerbotAI::InOwnersGroup(Player* bot, ObjectGuid const& group) const
+{
+    Group* botGroup = bot->GetGroup();
+    return botGroup && botGroup->GetGUID() == group;
+}
+
+void PlayerbotAI::MirrorQuestAccept(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
+{
+    Quest const* quest = sQuestDataStore->GetQuestTemplate(questId);
+    if (!quest || !InOwnersGroup(bot, group))
+        return;
+
+    // already on it or done with it, or a quest of another class / race: nothing to say
+    if (bot->GetQuestStatus(questId) != QUEST_STATUS_NONE || bot->GetQuestRewardStatus(questId)
+        || !bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
+        return;
+
+    if (bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false))
+    {
+        // no quest giver: the giver's script hooks stay with the owner's own accept
+        bot->AddQuestAndCheckCompletion(quest, nullptr);
+        return;
+    }
+
+    // tell the owner, so a bot falling behind on a chain is not a mystery
+    char const* reason = "I can't take it";
+    if (bot->FindQuestSlot(0) >= MAX_QUEST_LOG_SIZE)
+        reason = "my quest log is full";
+    else if (!bot->SatisfyQuestLevel(quest, false))
+        reason = "my level is too low";
+    else if (!bot->SatisfyQuestPreviousQuest(quest, false))
+        reason = "I haven't done the quest before it";
+    else if (!bot->CanAddQuest(quest, false))
+        reason = "no room in my bags for its item";
+    Say(bot, owner, "Can't take [" + quest->LogTitle + "]: " + reason + ".");
+}
+
+void PlayerbotAI::MirrorQuestReward(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
+{
+    Quest const* quest = sQuestDataStore->GetQuestTemplate(questId);
+    if (!quest || !InOwnersGroup(bot, group))
+        return;
+
+    QuestStatus const status = bot->GetQuestStatus(questId);
+    if ((status != QUEST_STATUS_INCOMPLETE && status != QUEST_STATUS_COMPLETE) || bot->GetQuestRewardStatus(questId))
+        return;
+
+    if (!bot->SatisfyQuestDay(quest, false) || !bot->SatisfyQuestWeek(quest) || !bot->SatisfyQuestSeasonal(quest))
+    {
+        Say(bot, owner, "Can't turn in [" + quest->LogTitle + "]: I've reached the limit for this quest.");
+        return;
+    }
+
+    uint32 const reward = ChooseQuestReward(bot, quest);
+    if (!QuestRewardsFit(bot, quest, reward))
+    {
+        Say(bot, owner, "Can't turn in [" + quest->LogTitle + "]: no room in my bags for the reward.");
+        return;
+    }
+
+    // its own objectives do not matter (owner's rule): mark it complete, then hand it in. A quest that
+    // rewards itself on completion is done after CompleteQuest.
+    if (status != QUEST_STATUS_COMPLETE)
+    {
+        bot->CompleteQuest(questId);
+        if (bot->GetQuestRewardStatus(questId))
+            return;
+    }
+
+    // the hook does not say where the owner turned it in: the bot stands in as the quest giver, as for a
+    // quest turned in from the quest log
+    bot->RewardQuest(quest, reward, bot, true);
+}
+
+uint32 PlayerbotAI::ChooseQuestReward(Player* bot, Quest const* quest) const
+{
+    std::vector<uint32> candidates;
+    for (uint32 i = 0; i < quest->m_rewChoiceItemsCount && i < QUEST_REWARD_CHOICES_COUNT; ++i)
+        if (quest->RewardChoiceItemId[i])
+            candidates.push_back(quest->RewardChoiceItemId[i]);
+
+    // Legion's class/spec rewards (QuestPackageItem.db2), as the client offers them
+    if (quest->PackageID)
+    {
+        bool selectable = false;
+        if (std::vector<QuestPackageItemEntry const*> const* items = sDB2Manager.GetQuestPackageItems(quest->PackageID))
+            for (QuestPackageItemEntry const* item : *items)
+                if (bot->CanSelectQuestPackageItem(item))
+                {
+                    candidates.push_back(uint32(item->ItemID));
+                    selectable = true;
+                }
+
+        if (!selectable)
+            if (std::vector<QuestPackageItemEntry const*> const* items = sDB2Manager.GetQuestPackageItemsFallback(quest->PackageID))
+                for (QuestPackageItemEntry const* item : *items)
+                    candidates.push_back(uint32(item->ItemID));
+    }
+
+    // SkyFire's scoring: an item the bot can use, by item level, armor and weapons first, sell price last
+    uint32 best = 0;
+    int64 bestScore = -1;
+    for (uint32 itemId : candidates)
+    {
+        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto)
+            continue;
+
+        int64 score = int64(proto->GetSellPrice());
+        if (bot->CanUseItem(proto) == EQUIP_ERR_OK)
+        {
+            score += int64(proto->GetBaseItemLevel()) * 1000;
+            if (proto->GetClass() == ITEM_CLASS_WEAPON || proto->GetClass() == ITEM_CLASS_ARMOR)
+                score += 5000;
+        }
+
+        if (score > bestScore)
+        {
+            bestScore = score;
+            best = itemId;
+        }
+    }
+    return best;
+}
+
+// room in the bags for what the quest hands out: the chosen item and the fixed rewards
+bool PlayerbotAI::QuestRewardsFit(Player* bot, Quest const* quest, uint32 reward) const
+{
+    auto fits = [bot](uint32 item, uint32 count)
+    {
+        if (!item || !count)
+            return true;
+        ItemPosCountVec dest;
+        return bot->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, item, count) == EQUIP_ERR_OK;
+    };
+
+    if (reward)
+    {
+        uint32 count = 1;
+        for (uint32 i = 0; i < quest->m_rewChoiceItemsCount && i < QUEST_REWARD_CHOICES_COUNT; ++i)
+            if (quest->RewardChoiceItemId[i] == reward)
+                count = quest->RewardChoiceItemCount[i];
+        if (!fits(reward, count))
+            return false;
+    }
+
+    for (uint32 i = 0; i < quest->m_rewItemsCount && i < QUEST_ITEM_COUNT; ++i)
+        if (!fits(quest->RewardItemId[i], quest->RewardItemCount[i]))
+            return false;
+
+    return true;
 }

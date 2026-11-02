@@ -15,6 +15,7 @@
 #include <string>
 
 class Player;
+class Quest;
 
 class PlayerbotAI
 {
@@ -28,6 +29,12 @@ public:
     // party/raid chat of the group `group`; only the owner's known orders are acted on, other talk is ignored
     void HandlePartyChat(Player* bot, ObjectGuid const& sender, uint32 senderAccount, ObjectGuid const& group, std::string const& text);
 
+    // Quests, as on SkyFire / AzerothCore: a bot in its owner's group takes the quests the owner takes,
+    // and turns a quest in when the owner does, whatever its own objectives; only bag space for the
+    // rewards and daily/weekly limits stop it. group = the owner's group when he acted.
+    void MirrorQuestAccept(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId);
+    void MirrorQuestReward(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId);
+
     // the bot's owner: its master (who added it), or a player of the bot's own account (its alts' player).
     // Reads only constant members: safe from any thread.
     bool IsMaster(ObjectGuid const& guid, uint32 accountId) const;
@@ -39,6 +46,11 @@ private:
     void UpdateFollow(Player* bot);
     void StopFollowing(Player* bot);
     void Say(Player* bot, ObjectGuid const& to, std::string const& text);
+    // the reward the bot takes: the best usable item among the quest's choices and its class/spec
+    // package items (both are what a client may send as ItemChoiceID); 0 when there is nothing to choose
+    uint32 ChooseQuestReward(Player* bot, Quest const* quest) const;
+    bool QuestRewardsFit(Player* bot, Quest const* quest, uint32 reward) const;
+    bool InOwnersGroup(Player* bot, ObjectGuid const& group) const;
 
     ObjectGuid _master;
     uint32 _accountId;

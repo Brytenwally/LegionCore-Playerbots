@@ -80,6 +80,18 @@ come first.
   - Party / raid / instance chat (`OnChat(..., Group*)`): sent to the sender's own bots
     (`PlayerbotMgr::GetBotsOwnedBy`); each bot checks on its thread that it is in that group.
     Unknown text is ignored (it is normal party talk). Replies go by whisper to the owner.
+- Quests (owner's rule, as on SkyFire / AzerothCore): `PlayerScript::OnQuestAccept` /
+  `OnQuestReward` of the owner -> posted to his bots; each acts only if it is in the owner's
+  group (any map). Accept: `AddQuestAndCheckCompletion(quest, nullptr)` (no giver, so the
+  giver's script hooks are not run twice) when `CanTakeQuest` + `CanAddQuest`, else a whispered
+  reason. Turn-in: a bot that has the quest turns it in **whatever its own objectives**
+  (`CompleteQuest` then `RewardQuest(quest, reward, bot)`; the bot stands in as the giver since
+  the hook does not name the owner's); only bag space for the rewards and daily/weekly/seasonal
+  limits stop it (whispered). Reward = best of the choice items + Legion quest package items
+  (`QuestPackageItem.db2`, `CanSelectQuestPackageItem`, fallback list), SkyFire's scoring
+  (usable, item level x1000, armor/weapon +5000, sell price). Bots' own accepts/turn-ins are not
+  mirrored. Note: the core calls `OnQuestAccept(player, quest)` only for accepts with a quest
+  giver (`AddQuestAndCheckCompletion` returns early without one).
 
 ## Status
 
@@ -90,8 +102,8 @@ come first.
   server** (build #5, core `b1befd3` + `c77aa64`): add, alt bot beside its player, summon, far
   teleport, list, logout with the account's player. 
 - 2026-11-02: step 3 started: group invite, follow, follow/stay orders by whisper (any map) and
-  party chat, owner only (see "Bot AI"). Compiles on Linux; Windows build and runtime test
-  pending.
+  party chat, owner only, quest accept/turn-in mirroring (see "Bot AI"). Compiles on Linux;
+  Windows build and runtime test pending.
 
 ## Checking
 
