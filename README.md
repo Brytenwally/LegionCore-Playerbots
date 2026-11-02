@@ -28,7 +28,9 @@ When you log out, the bots of your account (your alts) log out with you.
 - **Invite** the bot to your group: it accepts invites from the player who added it, or from a
   character of its own account, and declines others.
 - In a group it **follows** you (or the group leader), on the same map.
-- **Orders**: `follow`, `stay`. Whisper them to a bot (wherever it is), or say them in party /
+- **Orders**: `follow`, `stay`, `summon` (teleports the bot to you, any map), `leave` (leaves the
+  group), `quests` (quest log summary; `quests all`, `quests in` for quests in progress with
+  their objectives, `quests co` for completed ones). Whisper them to a bot (wherever it is), or say them in party /
   raid chat to all your bots in the group at once. Bots only obey their owner: the player who
   added them, or a character of their own account. They confirm by whisper.
 - **Quests**: bots in your group take the quests you take, and turn a quest in when you do, even

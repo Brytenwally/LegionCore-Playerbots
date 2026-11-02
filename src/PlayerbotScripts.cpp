@@ -71,11 +71,10 @@ public:
         if (!ai)
             return;
 
-        ObjectGuid const senderGuid = sender->GetGUID();
-        uint32 const senderAccount = session->GetAccountId();
-        ObjectAccessor::PostToPlayer(receiver, [ai, senderGuid, senderAccount, msg](Player* bot) -> void
+        OrderSender const order = MakeOrderSender(sender);
+        ObjectAccessor::PostToPlayer(receiver, [ai, order, msg](Player* bot) -> void
         {
-            ai->HandleWhisper(bot, senderGuid, senderAccount, msg);
+            ai->HandleWhisper(bot, order, msg);
         });
     }
 
@@ -100,16 +99,15 @@ public:
         if (!group || !session || session->IsBot())
             return;
 
-        ObjectGuid const senderGuid = player->GetGUID();
-        uint32 const senderAccount = session->GetAccountId();
+        OrderSender const order = MakeOrderSender(player);
         ObjectGuid const groupGuid = group->GetGUID();
         std::string const text = msg;
-        for (auto const& owned : sPlayerbotMgr->GetBotsOwnedBy(senderGuid, senderAccount))
+        for (auto const& owned : sPlayerbotMgr->GetBotsOwnedBy(order.guid, order.accountId))
         {
             std::shared_ptr<PlayerbotAI> ai = owned.second;
-            ObjectAccessor::PostToPlayer(owned.first, [ai, senderGuid, senderAccount, groupGuid, text](Player* bot) -> void
+            ObjectAccessor::PostToPlayer(owned.first, [ai, order, groupGuid, text](Player* bot) -> void
             {
-                ai->HandlePartyChat(bot, senderGuid, senderAccount, groupGuid, text);
+                ai->HandlePartyChat(bot, order, groupGuid, text);
             });
         }
     }
@@ -139,6 +137,17 @@ public:
     }
 
 private:
+    // read in the sender's own thread, carried with the order to the bot's
+    static OrderSender MakeOrderSender(Player* sender)
+    {
+        OrderSender order;
+        order.guid = sender->GetGUID();
+        order.accountId = sender->GetSession()->GetAccountId();
+        order.location = WorldLocation(sender->GetMapId(), sender->GetPositionX(), sender->GetPositionY(),
+            sender->GetPositionZ(), sender->GetOrientation());
+        return order;
+    }
+
     // runs action in the thread of each bot the player owns; each checks there that it is in his group.
     // A bot's own quest accepts and turn-ins call the same hooks: they are not mirrored.
     template<class Action>

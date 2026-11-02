@@ -5,6 +5,8 @@
 #include "PlayerbotAI.h"
 #include "DB2Stores.h"
 #include "Group.h"
+#include "Creature.h"
+#include "GameObject.h"
 #include "ItemTemplate.h"
 #include "Log.h"
 #include "MotionMaster.h"
@@ -122,18 +124,18 @@ void PlayerbotAI::StopFollowing(Player* bot)
     bot->GetMotionMaster()->MoveIdle();
 }
 
-void PlayerbotAI::HandleWhisper(Player* bot, ObjectGuid const& sender, uint32 senderAccount, std::string const& text)
+void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::string const& text)
 {
-    if (!IsMaster(sender, senderAccount))
+    if (!IsMaster(sender.guid, sender.accountId))
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender, "Orders I know: follow, stay.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, quests [all|in|co|summary].");
 }
 
-void PlayerbotAI::HandlePartyChat(Player* bot, ObjectGuid const& sender, uint32 senderAccount, ObjectGuid const& group, std::string const& text)
+void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
 {
-    if (!IsMaster(sender, senderAccount))
+    if (!IsMaster(sender.guid, sender.accountId))
         return;
 
     // the bot may have left that group since the message was sent
@@ -144,7 +146,7 @@ void PlayerbotAI::HandlePartyChat(Player* bot, ObjectGuid const& sender, uint32 
     HandleOrder(bot, sender, text);
 }
 
-bool PlayerbotAI::HandleOrder(Player* bot, ObjectGuid const& sender, std::string const& text)
+bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::string const& text)
 {
     std::string const order = Lower(text);
     if (order == "follow")
@@ -152,7 +154,7 @@ bool PlayerbotAI::HandleOrder(Player* bot, ObjectGuid const& sender, std::string
         _stay = false;
         _followGuid.Clear();                                // follow again at the next check
         _followTimer = FollowCheckInterval;
-        Say(bot, sender, bot->GetGroup() ? "Following." : "Following once I am in your group.");
+        Say(bot, sender.guid, bot->GetGroup() ? "Following." : "Following once I am in your group.");
         return true;
     }
 
@@ -162,11 +164,162 @@ bool PlayerbotAI::HandleOrder(Player* bot, ObjectGuid const& sender, std::string
         _followGuid.Clear();
         bot->GetMotionMaster()->Clear();
         bot->GetMotionMaster()->MoveIdle();
-        Say(bot, sender, "Staying here.");
+        Say(bot, sender.guid, "Staying here.");
         return true;
     }
 
+    if (order == "summon")
+    {
+        Summon(bot, sender);
+        return true;
+    }
+
+    if (order == "leave")
+    {
+        LeaveGroup(bot, sender);
+        return true;
+    }
+
+    if (order == "quests")
+        return ListQuests(bot, sender.guid, "summary");
+    if (order.rfind("quests ", 0) == 0)
+        return ListQuests(bot, sender.guid, order.substr(7));
+
     return false;
+}
+
+// Teleports the bot to where the owner stood when he gave the order, on any map; in an instance, the
+// map picks the instance of the bot's group, as for any member entering.
+void PlayerbotAI::Summon(Player* bot, OrderSender const& sender)
+{
+    if (!bot->IsAlive())
+    {
+        Say(bot, sender.guid, "I can't come, I'm dead.");
+        return;
+    }
+
+    if (bot->isInFlight())
+    {
+        Say(bot, sender.guid, "I can't come, I'm on a flight.");
+        return;
+    }
+
+    _stay = false;                                          // a summoned bot follows again
+    _followGuid.Clear();
+    bot->GetMotionMaster()->Clear();
+    if (!bot->TeleportTo(sender.location))
+    {
+        Say(bot, sender.guid, "I can't get there.");
+        return;
+    }
+    Say(bot, sender.guid, "Coming.");
+}
+
+// as a client leaving the group: CMSG_LEAVE_GROUP (LeaveGroup::Read: int8 PartyIndex)
+void PlayerbotAI::LeaveGroup(Player* bot, OrderSender const& sender)
+{
+    if (!bot->GetGroup())
+    {
+        Say(bot, sender.guid, "I'm not in a group.");
+        return;
+    }
+
+    WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
+    *packet << int8(0);
+    bot->GetSession()->QueuePacket(packet);
+
+    _stay = false;
+    StopFollowing(bot);
+    Say(bot, sender.guid, "Leaving the group.");
+}
+
+bool PlayerbotAI::ListQuests(Player* bot, ObjectGuid const& to, std::string const& args)
+{
+    bool showIncomplete = false;
+    bool showComplete = false;
+    if (args == "all")
+        showIncomplete = showComplete = true;
+    else if (args == "completed" || args == "co")
+        showComplete = true;
+    else if (args == "incompleted" || args == "in")
+        showIncomplete = true;
+    else if (args != "summary")
+        return false;
+
+    // a quest in progress also gets its objectives, "3/8 Kobold Vermin"
+    auto questLine = [bot](Quest const* quest, bool complete) -> std::string
+    {
+        std::string line = "[" + quest->LogTitle + "]";
+        if (complete)
+            return line;
+
+        std::string objectives;
+        for (QuestObjective const& objective : quest->GetObjectives())
+        {
+            if (objective.Amount <= 0 || (objective.Flags & QUEST_OBJECTIVE_FLAG_HIDDEN))
+                continue;
+
+            int32 const amount = objective.Amount;
+            int32 done = objective.Type == QUEST_OBJECTIVE_ITEM ? int32(bot->GetItemCount(objective.ObjectID))
+                : bot->GetQuestObjectiveData(quest, objective.StorageIndex);
+            done = std::max(0, std::min(done, amount));
+
+            std::string label = objective.Description;
+            if (label.empty())
+            {
+                if (objective.Type == QUEST_OBJECTIVE_MONSTER)
+                {
+                    if (CreatureTemplate const* creature = sObjectMgr->GetCreatureTemplate(objective.ObjectID))
+                        label = creature->Name[0];
+                }
+                else if (objective.Type == QUEST_OBJECTIVE_GAMEOBJECT)
+                {
+                    if (GameObjectTemplate const* go = sObjectMgr->GetGameObjectTemplate(objective.ObjectID))
+                        label = go->name;
+                }
+            }
+            if (label.empty())
+                label = "objective";
+
+            std::string const piece = std::to_string(done) + "/" + std::to_string(amount) + " " + label;
+            // the client cuts whispers past ~255 characters
+            if (line.size() + objectives.size() + piece.size() > 230)
+                break;
+            objectives += objectives.empty() ? " - " : ", ";
+            objectives += piece;
+        }
+        return line + objectives;
+    };
+
+    uint32 incomplete = 0;
+    uint32 complete = 0;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        bool const completedPass = pass == 1;
+        bool const show = completedPass ? showComplete : showIncomplete;
+        if (show)
+            Say(bot, to, completedPass ? "--- Completed quests ---" : "--- Incompleted quests ---");
+
+        for (uint16 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+        {
+            uint32 const questId = bot->GetQuestSlotQuestId(slot);
+            Quest const* quest = questId ? sQuestDataStore->GetQuestTemplate(questId) : nullptr;
+            if (!quest)
+                continue;
+
+            bool const isComplete = bot->GetQuestStatus(questId) == QUEST_STATUS_COMPLETE;
+            if (isComplete != completedPass)
+                continue;
+
+            ++(isComplete ? complete : incomplete);
+            if (show)
+                Say(bot, to, questLine(quest, isComplete));
+        }
+    }
+
+    Say(bot, to, "Quests: " + std::to_string(incomplete + complete) + " / " + std::to_string(MAX_QUEST_LOG_SIZE)
+        + " (in progress: " + std::to_string(incomplete) + ", completed: " + std::to_string(complete) + ")");
+    return true;
 }
 
 void PlayerbotAI::Say(Player* bot, ObjectGuid const& to, std::string const& text)

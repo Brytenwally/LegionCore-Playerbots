@@ -12,10 +12,20 @@
 
 #include "Define.h"
 #include "ObjectGuid.h"
+#include "Position.h"
 #include <string>
 
 class Player;
 class Quest;
+
+// Who gave an order, read in his own thread when he gave it: the bot runs the order in its own thread and
+// must not touch another map's player.
+struct OrderSender
+{
+    ObjectGuid guid;
+    uint32 accountId = 0;
+    WorldLocation location;                                 // where he stood (summon)
+};
 
 class PlayerbotAI
 {
@@ -25,9 +35,9 @@ public:
 
     void Update(Player* bot, uint32 diff);
     // a whisper to the bot, from anywhere; only its owner is obeyed
-    void HandleWhisper(Player* bot, ObjectGuid const& sender, uint32 senderAccount, std::string const& text);
+    void HandleWhisper(Player* bot, OrderSender const& sender, std::string const& text);
     // party/raid chat of the group `group`; only the owner's known orders are acted on, other talk is ignored
-    void HandlePartyChat(Player* bot, ObjectGuid const& sender, uint32 senderAccount, ObjectGuid const& group, std::string const& text);
+    void HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text);
 
     // Quests, as on SkyFire / AzerothCore: a bot in its owner's group takes the quests the owner takes,
     // and turns a quest in when the owner does, whatever its own objectives; only bag space for the
@@ -41,7 +51,11 @@ public:
 
 private:
     // carries out a known order and confirms it to the sender; false for an unknown order
-    bool HandleOrder(Player* bot, ObjectGuid const& sender, std::string const& text);
+    bool HandleOrder(Player* bot, OrderSender const& sender, std::string const& text);
+    void Summon(Player* bot, OrderSender const& sender);
+    void LeaveGroup(Player* bot, OrderSender const& sender);
+    // quests [all|incompleted|in|completed|co|summary]: whispers the quest log, as SkyFire's ListQuestsAction
+    bool ListQuests(Player* bot, ObjectGuid const& to, std::string const& args);
     void HandleGroupInvite(Player* bot);
     void UpdateFollow(Player* bot);
     void StopFollowing(Player* bot);
