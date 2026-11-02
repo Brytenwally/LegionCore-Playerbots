@@ -6,8 +6,21 @@ port of the AzerothCore playerbots.
 
 ## Status
 
-Skeleton only: the module builds, loads `playerbots.conf` and logs at startup. Bots come once
-the core has its bot session hooks (see the plan in the core's `CLAUDE.md`).
+Bots can log in and out; they have no AI yet (they stand where they were saved). Needs
+LegionCore-Reforged with its bot session hooks (`WorldSession::CreateBotSession`).
+
+## GM commands
+
+Set `Playerbots.Enable = 1` in `playerbots.conf` first.
+
+| Command | What it does |
+| --- | --- |
+| `.playerbots add <name>` | Logs the character in as a bot (it must not be online). You get `Bot 'X' logged in.` once it is in the world. |
+| `.playerbots remove <name>` | Logs the bot out (saved). |
+| `.playerbots removeall` | Logs every bot out. |
+| `.playerbots list` | Lists the bots and their state. |
+
+When you log out, the bots of your account (your alts) log out with you.
 
 ## Install
 

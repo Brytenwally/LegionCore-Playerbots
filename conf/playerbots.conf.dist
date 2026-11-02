@@ -9,7 +9,7 @@
 
 #
 #    Playerbots.Enable
-#        Master switch for the playerbots module.
+#        Master switch for the playerbots module (the .playerbots GM commands).
 #        Default: 0 - (Disabled)
 #                 1 - (Enabled)
 
