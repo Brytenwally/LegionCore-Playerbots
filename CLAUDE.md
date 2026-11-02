@@ -63,8 +63,8 @@ come first.
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the
   Windows worldserver (LegionCore-Build run #3, which now includes this module by default).
   Verified on the owner's server 2026-11-02: `[mod-playerbots] Module loaded (disabled)`. 
-- 2026-11-02: bot lifecycle (see above) on the core's bot sessions. Compiles on Linux; Windows
-  build and runtime test on the owner's server pending.
+- 2026-11-02: bot lifecycle (see above) on the core's bot sessions. Windows build #4 green
+  (core `c9fe307` + `7a365a8`); runtime test on the owner's server pending.
 
 ## Checking
 
