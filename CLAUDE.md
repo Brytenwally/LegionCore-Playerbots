@@ -34,7 +34,8 @@ is read there and rewritten for Legion here.
 ## Status
 
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the
-  Windows worldserver (LegionCore-Build run #3, which now includes this module by default). Plan step 2 (bot session hooks in
+  Windows worldserver (LegionCore-Build run #3, which now includes this module by default).
+  Verified on the owner's server 2026-11-02: `[mod-playerbots] Module loaded (disabled)`. Plan step 2 (bot session hooks in
   the core) comes before any bot code here.
 
 ## Checking
