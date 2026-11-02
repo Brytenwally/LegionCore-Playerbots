@@ -1,8 +1,8 @@
 /*
  * mod-playerbots: script registration and GM commands.
  *
- * Plan step 2/3: bots log in, stay in the world and log out on the core's bot sessions. They have
- * no AI yet: a bot stands where its character was saved.
+ * Bots log in and out on the core's bot sessions (PlayerbotMgr); each has a PlayerbotAI that joins
+ * its master's group, follows, and takes whispered orders.
  */
 
 #include "ScriptMgr.h"
@@ -10,6 +10,7 @@
 #include "Config.h"
 #include "Log.h"
 #include "Player.h"
+#include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
 #include "WorldSession.h"
 
@@ -44,6 +45,27 @@ class playerbots_player : public PlayerScript
 {
 public:
     playerbots_player() : PlayerScript("playerbots_player") { }
+
+    // the bot's AI tick, on its map thread
+    void OnUpdate(Player* player, uint32 diff) override
+    {
+        WorldSession* session = player->GetSession();
+        if (!session || !session->IsBot())
+            return;
+
+        if (std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(player->GetGUID()))
+            ai->Update(player, diff);
+    }
+
+    // whispered orders; the core passes the receiver only when he stands on the sender's map (same thread)
+    void OnChat(Player* player, uint32 type, uint32 /*lang*/, std::string& msg, Player* receiver) override
+    {
+        if (type != CHAT_MSG_WHISPER || !receiver || !receiver->GetSession() || !receiver->GetSession()->IsBot())
+            return;
+
+        if (std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(receiver->GetGUID()))
+            ai->HandleWhisper(receiver, player, msg);
+    }
 
     void OnLogout(Player* player) override
     {

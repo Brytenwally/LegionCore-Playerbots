@@ -6,7 +6,8 @@ port of the AzerothCore playerbots.
 
 ## Status
 
-Bots can log in and out; they have no AI yet (they stand where they were saved). Needs
+Bots log in and out, join your group, follow you and take whispered `follow` / `stay` orders.
+No combat yet. Needs
 LegionCore-Reforged with its bot session hooks (`WorldSession::CreateBotSession`).
 
 ## GM commands
@@ -21,6 +22,13 @@ Set `Playerbots.Enable = 1` in `playerbots.conf` first.
 | `.playerbots list` | Lists the bots and their state. |
 
 When you log out, the bots of your account (your alts) log out with you.
+
+## Playing with a bot
+
+- **Invite** the bot to your group: it accepts invites from the player who added it, or from a
+  character of its own account, and declines others.
+- In a group it **follows** you (or the group leader), on the same map.
+- **Whisper** orders: `follow`, `stay`.
 
 ## Install
 

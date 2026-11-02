@@ -3,6 +3,7 @@
  */
 
 #include "PlayerbotMgr.h"
+#include "PlayerbotAI.h"
 #include "AccountMgr.h"
 #include "Chat.h"
 #include "Config.h"
@@ -186,6 +187,10 @@ void PlayerbotMgr::Update(uint32 diff)
             else
                 TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logged out.", bot.name.c_str());
 
+            {
+                std::lock_guard<std::mutex> lock(_aiLock);
+                _ais.erase(itr->first);
+            }
             itr = _bots.erase(itr);
             continue;
         }
@@ -195,6 +200,10 @@ void PlayerbotMgr::Update(uint32 diff)
                 if (player->IsInWorld())
                 {
                     bot.inWorld = true;
+                    {
+                        std::lock_guard<std::mutex> lock(_aiLock);
+                        _ais[itr->first] = std::make_shared<PlayerbotAI>(bot.notifyGuid, session->GetAccountId());
+                    }
                     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logged in (map %u).", bot.name.c_str(), player->GetMapId());
                     // SquidBots Lite (SkyFire) parses this exact text: keep the wording
                     Notify(bot.notifyGuid, "Bot '" + bot.name + "' logged in.");
@@ -202,6 +211,13 @@ void PlayerbotMgr::Update(uint32 diff)
 
         ++itr;
     }
+}
+
+std::shared_ptr<PlayerbotAI> PlayerbotMgr::GetAI(ObjectGuid const& bot) const
+{
+    std::lock_guard<std::mutex> lock(_aiLock);
+    auto itr = _ais.find(bot);
+    return itr != _ais.end() ? itr->second : nullptr;
 }
 
 void PlayerbotMgr::OnPlayerLogout(uint32 accountId)
@@ -213,5 +229,9 @@ void PlayerbotMgr::OnPlayerLogout(uint32 accountId)
 void PlayerbotMgr::Shutdown()
 {
     // the maps log the characters out when they unload; the sessions go with the last reference
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        _ais.clear();
+    }
     _bots.clear();
 }

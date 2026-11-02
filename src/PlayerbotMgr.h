@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+class PlayerbotAI;
 class WorldSession;
 
 class PlayerbotMgr
@@ -42,6 +43,9 @@ public:
     };
     std::vector<BotInfo> ListBots() const;
 
+    // the bot's AI, from any thread (the AI itself is used on the bot's own map thread only)
+    std::shared_ptr<PlayerbotAI> GetAI(ObjectGuid const& bot) const;
+
     // World thread, every world update.
     void Update(uint32 diff);
     // Any thread: a client's character logged out.
@@ -65,6 +69,8 @@ private:
 
     bool _enabled = false;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
+    mutable std::mutex _aiLock;
+    std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads
     std::mutex _logoutLock;
     std::vector<uint32> _loggedOutAccounts;                 // filled from map threads, read in Update
 };

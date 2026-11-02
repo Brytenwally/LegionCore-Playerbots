@@ -56,7 +56,23 @@ come first.
   alt is never left running while the player logs into it.
 - GM commands: `.playerbots add <name>`, `remove <name>`, `removeall`, `list`. Need
   `Playerbots.Enable = 1`. Any character of any account; must not be online.
-- Bots have no AI yet: they stand where they were saved.
+
+## Bot AI (plan step 3, in progress)
+
+- `PlayerbotAI` (`src/PlayerbotAI.*`), one per bot, created by `PlayerbotMgr::Update` when the bot
+  is in the world (`_ais`, mutex: written on the world thread, read from map threads via
+  `GetAI`). Driven by `PlayerScript::OnUpdate` (bot's map thread) and `OnChat` whispers (only
+  when the bot stands on the sender's map: the core gives no receiver otherwise).
+- Master = the player who added the bot (`.playerbots add`); "master" checks also accept any
+  player of the bot's own account (`IsMaster`).
+- Group invite: answered with a queued `CMSG_PARTY_INVITE_RESPONSE` (int8 PartyIndex, bit
+  Accept, bit HasRolesDesired) so the core's `AcceptPartyInvite` does the joining. Accepted
+  from the master, declined from anyone else. Once per invite (`_answeredInvite`, cleared when
+  no invite is pending).
+- Follow: every 500 ms, out of `stay`, in a group, alive: `MoveFollow(target, 2 yd, behind)`
+  where target = master if in the group, else the group leader, same map only. Not yet: combat,
+  mounts, following across maps (summon), formations.
+- Whisper orders (master only): `follow`, `stay`; anything else gets the list of orders.
 
 ## Status
 
@@ -65,8 +81,9 @@ come first.
   Verified on the owner's server 2026-11-02: `[mod-playerbots] Module loaded (disabled)`. 
 - 2026-11-02: bot lifecycle (see above) on the core's bot sessions. **Verified on the owner's
   server** (build #5, core `b1befd3` + `c77aa64`): add, alt bot beside its player, summon, far
-  teleport, list, logout with the account's player. Next: plan step 3 (port the SkyFire
-  skeleton: group, follow, whisper orders, strategy engine).
+  teleport, list, logout with the account's player. 
+- 2026-11-02: step 3 started: group invite, follow, whisper follow/stay (see "Bot AI"). Compiles
+  on Linux; Windows build and runtime test pending.
 
 ## Checking
 
