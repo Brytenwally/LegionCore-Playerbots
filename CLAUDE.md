@@ -163,7 +163,8 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
 - `BotMovement`: role formation (tank 2.5 yd, dps 4 yd left/right, healer 9 yd behind the leader,
   ground Z), `MoveToFormation`, `CatchUp` (near teleport past 80 yd or 3 yd of height), `Engage`
   (attack + chase, melee or at range), `Disengage`.
-- Compiled in the container against the core (scripts PCH), 2026-11-03.
+- Compiled in the container against the core (scripts PCH), and on Windows in LegionCore-Build
+  run #15 (core `77189b3` + `092a80c`), 2026-11-03.
 
 ## Status
 
