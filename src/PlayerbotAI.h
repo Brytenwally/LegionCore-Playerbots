@@ -26,6 +26,8 @@ struct OrderSender
     ObjectGuid guid;
     uint32 accountId = 0;
     WorldLocation location;                                 // where he stood (summon)
+    bool inCombat = false;                                  // he was in combat (summon revive)
+    bool partyChat = false;                                 // given in party/raid chat, not whispered
 };
 
 class PlayerbotAI

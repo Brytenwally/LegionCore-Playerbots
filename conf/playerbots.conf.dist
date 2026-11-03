@@ -14,3 +14,14 @@
 #                 1 - (Enabled)
 
 Playerbots.Enable = 0
+
+#
+#    Playerbots.Summon.Revive
+#        A dead bot is revived (full health and mana) when its owner says "summon" in party or
+#        raid chat, then comes to him. Bots are never revived on their own; a whispered summon
+#        does not revive.
+#        Default: 1 - (Only while the owner is out of combat)
+#                 0 - (Never: a dead bot stays dead)
+#                 2 - (Also while the owner is in combat)
+
+Playerbots.Summon.Revive = 1

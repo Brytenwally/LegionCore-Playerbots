@@ -3,6 +3,7 @@
  */
 
 #include "PlayerbotAI.h"
+#include "PlayerbotMgr.h"
 #include "DB2Stores.h"
 #include "Group.h"
 #include "CellImpl.h"
@@ -214,12 +215,32 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
 
 // Teleports the bot to where the owner stood when he gave the order, on any map; in an instance, the
 // map picks the instance of the bot's group, as for any member entering.
+// Owner's rule (2026-11-03): a dead bot is revived only by "summon" in party chat, and only while the
+// owner is out of combat unless Playerbots.Summon.Revive = 2. Bots are never revived on their own.
 void PlayerbotAI::Summon(Player* bot, OrderSender const& sender)
 {
     if (!bot->IsAlive())
     {
-        Say(bot, sender.guid, "I can't come, I'm dead.");
-        return;
+        PlayerbotMgr::SummonRevive const revive = sPlayerbotMgr->GetSummonRevive();
+        if (revive == PlayerbotMgr::SummonRevive::Never)
+        {
+            Say(bot, sender.guid, "I can't come, I'm dead.");
+            return;
+        }
+        if (!sender.partyChat)
+        {
+            Say(bot, sender.guid, "I'm dead. Say summon in party chat to revive me.");
+            return;
+        }
+        if (sender.inCombat && revive != PlayerbotMgr::SummonRevive::Always)
+        {
+            Say(bot, sender.guid, "I'm dead. Summon me again once you are out of combat.");
+            return;
+        }
+
+        bot->ResurrectPlayer(1.0f);
+        bot->SpawnCorpseBones();
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' revived by its owner's summon.", bot->GetName());
     }
 
     if (bot->isInFlight())

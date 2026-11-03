@@ -14,6 +14,7 @@
 #include "Player.h"
 #include "World.h"
 #include "WorldSession.h"
+#include <algorithm>
 
 PlayerbotMgr* PlayerbotMgr::instance()
 {
@@ -24,6 +25,7 @@ PlayerbotMgr* PlayerbotMgr::instance()
 void PlayerbotMgr::LoadConfig()
 {
     _enabled = sConfigMgr->GetBoolDefault("Playerbots.Enable", false);
+    _summonRevive = SummonRevive(std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.Summon.Revive", 1), 2));
 }
 
 bool PlayerbotMgr::AddBot(std::string name, ObjectGuid const& notifyGuid, std::string& error)

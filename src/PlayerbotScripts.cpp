@@ -99,7 +99,8 @@ public:
         if (!group || !session || session->IsBot())
             return;
 
-        OrderSender const order = MakeOrderSender(player);
+        OrderSender order = MakeOrderSender(player);
+        order.partyChat = true;
         ObjectGuid const groupGuid = group->GetGUID();
         std::string const text = msg;
         for (auto const& owned : sPlayerbotMgr->GetBotsOwnedBy(order.guid, order.accountId))
@@ -145,6 +146,7 @@ private:
         order.accountId = sender->GetSession()->GetAccountId();
         order.location = WorldLocation(sender->GetMapId(), sender->GetPositionX(), sender->GetPositionY(),
             sender->GetPositionZ(), sender->GetOrientation());
+        order.inCombat = sender->isInCombat();
         return order;
     }
 

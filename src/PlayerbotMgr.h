@@ -29,6 +29,14 @@ public:
     void LoadConfig();
     bool IsEnabled() const { return _enabled; }
 
+    enum class SummonRevive : uint8
+    {
+        Never,              // a dead bot is not summoned
+        OutOfCombat,        // revived by "summon" in party chat while the owner is out of combat
+        Always              // also while the owner is in combat
+    };
+    SummonRevive GetSummonRevive() const { return _summonRevive; }
+
     // Starts logging the character in as a bot. notifyGuid (may be empty) gets "Bot 'X' logged in."
     // when the character is in the world, or the reason it failed.
     bool AddBot(std::string name, ObjectGuid const& notifyGuid, std::string& error);
@@ -70,6 +78,7 @@ private:
     Bot* FindBotByName(std::string const& name);
 
     bool _enabled = false;
+    SummonRevive _summonRevive = SummonRevive::OutOfCombat;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

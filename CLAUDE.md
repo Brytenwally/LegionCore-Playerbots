@@ -84,13 +84,19 @@ come first.
   mounts, following across maps (summon), formations.
 - Orders, from the **owner only** (owner's rule, 2026-11-02; owner = `IsMaster`: the master or
   a player of the bot's account): `follow`, `stay`, `summon` (teleport to where the owner stood
-  when he gave the order, any map; not dead or on a flight; clears `stay`), `leave` (queued
+  when he gave the order, any map; not on a flight; clears `stay`; a dead bot is revived first,
+  see below), `leave` (queued
   `CMSG_LEAVE_GROUP`, int8 PartyIndex), `quests [all|in|incompleted|co|completed|summary]` (bare
   = summary; SkyFire's ListQuestsAction: titles in brackets, objectives "3/8 label" from
   `GetQuestObjectiveData(quest, StorageIndex)` / item counts, label = objective Description or
   creature/gameobject name, lines cut at ~230 chars). The sender is an `OrderSender` (guid,
   account, `WorldLocation`) read in his own thread by the hook, so the bot never touches
   another map's player.
+  - Summon revive (owner's rule, 2026-11-03): a dead bot is revived (`ResurrectPlayer(1.0f)`,
+    `SpawnCorpseBones`) only by `summon` **in party/raid chat** (`OrderSender::partyChat`), and
+    while the owner is out of combat (`OrderSender::inCombat`, read in his thread) unless
+    `Playerbots.Summon.Revive = 2` (0 = never). A whispered summon only tells how. Bots are never
+    revived on their own.
   - Whisper: core hook `PlayerScript::OnWhisper` (receiver guid, any map). Unknown text gets
     the list of orders.
   - Party / raid / instance chat (`OnChat(..., Group*)`): sent to the sender's own bots
@@ -163,6 +169,8 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
 - `BotMovement`: role formation (tank 2.5 yd, dps 4 yd left/right, healer 9 yd behind the leader,
   ground Z), `MoveToFormation`, `CatchUp` (near teleport past 80 yd or 3 yd of height), `Engage`
   (attack + chase, melee or at range), `Disengage`.
+- Owner's decisions for them (2026-11-03, details in the core's `CLAUDE.md`): no tank threat
+  bonus; talents learned automatically on every bot, alts included, but only into empty rows.
 - Compiled in the container against the core (scripts PCH), and on Windows in LegionCore-Build
   run #15 (core `77189b3` + `092a80c`), 2026-11-03.
 
