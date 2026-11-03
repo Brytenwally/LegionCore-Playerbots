@@ -126,8 +126,9 @@ come first.
     now (`CanTakeQuest`: previous quest done), class-specific before unrestricted**; same for
     `quest take` (`MatchQuest` prefers, among equal title matches, the quest the bot can take),
     since the NPC offers every copy. `quests available` was already right (lists only quests
-    `CanTakeQuest` accepts). Index built once from
-  `sQuestDataStore->GetQuestTemplates()` (`std::call_once`).
+    `CanTakeQuest` accepts).
+  - Copy index (`LogTitle` + `QuestSortID` -> quest ids) built once from
+    `sQuestDataStore->GetQuestTemplates()` (`std::call_once`).
 - **Manual quest orders** (owner's request, 2026-11-03), for class versions that are not copies:
   `quests available` (the nearest quest giver within 30 yd: quests the bot can take there, and
   quests of its log it can turn in there), `quest take <name>` (from a quest giver within 30 yd,
