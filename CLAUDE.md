@@ -101,6 +101,11 @@ come first.
   (usable, item level x1000, armor/weapon +5000, sell price). Bots' own accepts/turn-ins are not
   mirrored. Note: the core calls `OnQuestAccept(player, quest)` only for accepts with a quest
   giver (`AddQuestAndCheckCompletion` returns early without one).
+  Every step is logged (`[mod-playerbots] <owner> accepted|turned in quest N: passed to n bot(s)`,
+  then per bot `Bot 'X', quest N: accepted / turned in / ... skipped, <reason>`). 2026-11-02: the
+  owner reported bots neither accepting nor turning in with him while invite/follow/orders/summon
+  /leave worked (build #10); the hooks and posting were read and look right, the logs were added
+  to find where it stops.
 
 ## Status
 

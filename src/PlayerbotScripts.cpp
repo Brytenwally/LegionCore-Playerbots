@@ -115,7 +115,7 @@ public:
     // quests: the owner's accepts and turn-ins are mirrored by his bots in his group
     void OnQuestAccept(Player* player, Quest const* quest) override
     {
-        ForOwnedBotsInGroup(player, quest, [](PlayerbotAI* ai, Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
+        ForOwnedBotsInGroup(player, quest, "accepted", [](PlayerbotAI* ai, Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
         {
             ai->MirrorQuestAccept(bot, owner, group, questId);
         });
@@ -123,7 +123,7 @@ public:
 
     void OnQuestReward(Player* player, Quest const* quest) override
     {
-        ForOwnedBotsInGroup(player, quest, [](PlayerbotAI* ai, Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
+        ForOwnedBotsInGroup(player, quest, "turned in", [](PlayerbotAI* ai, Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
         {
             ai->MirrorQuestReward(bot, owner, group, questId);
         });
@@ -151,17 +151,27 @@ private:
     // runs action in the thread of each bot the player owns; each checks there that it is in his group.
     // A bot's own quest accepts and turn-ins call the same hooks: they are not mirrored.
     template<class Action>
-    static void ForOwnedBotsInGroup(Player* player, Quest const* quest, Action action)
+    static void ForOwnedBotsInGroup(Player* player, Quest const* quest, char const* what, Action action)
     {
         WorldSession* session = player->GetSession();
-        Group* group = player->GetGroup();
-        if (!quest || !group || !session || session->IsBot())
+        if (!quest || !session || session->IsBot())
             return;
+
+        Group* group = player->GetGroup();
+        if (!group)
+        {
+            TC_LOG_INFO("server.loading", "[mod-playerbots] %s %s quest %u: not in a group, no bot follows.",
+                player->GetName(), what, quest->GetQuestId());
+            return;
+        }
 
         ObjectGuid const owner = player->GetGUID();
         ObjectGuid const groupGuid = group->GetGUID();
         uint32 const questId = quest->GetQuestId();
-        for (auto const& owned : sPlayerbotMgr->GetBotsOwnedBy(owner, session->GetAccountId()))
+        auto const bots = sPlayerbotMgr->GetBotsOwnedBy(owner, session->GetAccountId());
+        TC_LOG_INFO("server.loading", "[mod-playerbots] %s %s quest %u: passed to %u bot(s).",
+            player->GetName(), what, questId, uint32(bots.size()));
+        for (auto const& owned : bots)
         {
             std::shared_ptr<PlayerbotAI> ai = owned.second;
             ObjectAccessor::PostToPlayer(owned.first, [ai, action, owner, groupGuid, questId](Player* bot) -> void

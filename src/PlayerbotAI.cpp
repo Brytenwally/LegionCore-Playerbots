@@ -334,21 +334,47 @@ bool PlayerbotAI::InOwnersGroup(Player* bot, ObjectGuid const& group) const
     return botGroup && botGroup->GetGUID() == group;
 }
 
+namespace
+{
+    // every mirrored quest step is logged: a bot skipping a quest must be explainable from the console
+    void LogQuest(Player* bot, uint32 questId, char const* what)
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: %s", bot->GetName(), questId, what);
+    }
+}
+
 void PlayerbotAI::MirrorQuestAccept(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
 {
     Quest const* quest = sQuestDataStore->GetQuestTemplate(questId);
-    if (!quest || !InOwnersGroup(bot, group))
+    if (!quest)
         return;
 
-    // already on it or done with it, or a quest of another class / race: nothing to say
-    if (bot->GetQuestStatus(questId) != QUEST_STATUS_NONE || bot->GetQuestRewardStatus(questId)
-        || !bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
+    if (!InOwnersGroup(bot, group))
+    {
+        LogQuest(bot, questId, "accept skipped, not in the owner's group");
         return;
+    }
+
+    // already on it or done with it, or a quest of another class / race: nothing to say
+    QuestStatus const status = bot->GetQuestStatus(questId);
+    if (status != QUEST_STATUS_NONE || bot->GetQuestRewardStatus(questId))
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: accept skipped, already has it (status %u, rewarded %u)",
+            bot->GetName(), questId, uint32(status), uint32(bot->GetQuestRewardStatus(questId)));
+        return;
+    }
+    if (!bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
+    {
+        LogQuest(bot, questId, "accept skipped, another class or race");
+        return;
+    }
 
     if (bot->CanTakeQuest(quest, false) && bot->CanAddQuest(quest, false))
     {
         // no quest giver: the giver's script hooks stay with the owner's own accept
         bot->AddQuestAndCheckCompletion(quest, nullptr);
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: accepted with its owner (status now %u)",
+            bot->GetName(), questId, uint32(bot->GetQuestStatus(questId)));
         return;
     }
 
@@ -362,21 +388,33 @@ void PlayerbotAI::MirrorQuestAccept(Player* bot, ObjectGuid const& owner, Object
         reason = "I haven't done the quest before it";
     else if (!bot->CanAddQuest(quest, false))
         reason = "no room in my bags for its item";
+    LogQuest(bot, questId, (std::string("accept refused: ") + reason).c_str());
     Say(bot, owner, "Can't take [" + quest->LogTitle + "]: " + reason + ".");
 }
 
 void PlayerbotAI::MirrorQuestReward(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
 {
     Quest const* quest = sQuestDataStore->GetQuestTemplate(questId);
-    if (!quest || !InOwnersGroup(bot, group))
+    if (!quest)
         return;
+
+    if (!InOwnersGroup(bot, group))
+    {
+        LogQuest(bot, questId, "turn-in skipped, not in the owner's group");
+        return;
+    }
 
     QuestStatus const status = bot->GetQuestStatus(questId);
     if ((status != QUEST_STATUS_INCOMPLETE && status != QUEST_STATUS_COMPLETE) || bot->GetQuestRewardStatus(questId))
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turn-in skipped, not in its log (status %u, rewarded %u)",
+            bot->GetName(), questId, uint32(status), uint32(bot->GetQuestRewardStatus(questId)));
         return;
+    }
 
     if (!bot->SatisfyQuestDay(quest, false) || !bot->SatisfyQuestWeek(quest) || !bot->SatisfyQuestSeasonal(quest))
     {
+        LogQuest(bot, questId, "turn-in refused, daily/weekly/seasonal limit");
         Say(bot, owner, "Can't turn in [" + quest->LogTitle + "]: I've reached the limit for this quest.");
         return;
     }
@@ -384,6 +422,7 @@ void PlayerbotAI::MirrorQuestReward(Player* bot, ObjectGuid const& owner, Object
     uint32 const reward = ChooseQuestReward(bot, quest);
     if (!QuestRewardsFit(bot, quest, reward))
     {
+        LogQuest(bot, questId, "turn-in refused, no bag room for the reward");
         Say(bot, owner, "Can't turn in [" + quest->LogTitle + "]: no room in my bags for the reward.");
         return;
     }
@@ -394,12 +433,17 @@ void PlayerbotAI::MirrorQuestReward(Player* bot, ObjectGuid const& owner, Object
     {
         bot->CompleteQuest(questId);
         if (bot->GetQuestRewardStatus(questId))
+        {
+            LogQuest(bot, questId, "turned in with its owner (rewarded on completion)");
             return;
+        }
     }
 
     // the hook does not say where the owner turned it in: the bot stands in as the quest giver, as for a
     // quest turned in from the quest log
     bot->RewardQuest(quest, reward, bot, true);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turned in with its owner (reward item %u, rewarded %u)",
+        bot->GetName(), questId, reward, uint32(bot->GetQuestRewardStatus(questId)));
 }
 
 uint32 PlayerbotAI::ChooseQuestReward(Player* bot, Quest const* quest) const
