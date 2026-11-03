@@ -18,6 +18,13 @@ is read there and rewritten for Legion here.
 - Commit and push straight to **`main`**. No feature branches or PRs unless the owner asks.
 - Imperative subject, body explaining what and why. No model names in commits.
 
+## Keep this file current (owner's rule, 2026-11-03)
+
+Every time a problem is resolved or something new is learned about how the core, the database or
+this module behaves, write it here **in the same commit as the fix**, without being asked: what
+went wrong, the evidence that found it (log lines, data), and the rule that follows for future
+code. Record each runtime test result the owner reports under "Status".
+
 ## Owner's priority
 
 Random bots' open-world activity (questing on their own, level-appropriate zones, grinding,
@@ -121,8 +128,12 @@ come first.
   server** (build #5, core `b1befd3` + `c77aa64`): add, alt bot beside its player, summon, far
   teleport, list, logout with the account's player. 
 - 2026-11-02: step 3 started: group invite, follow, follow/stay orders by whisper (any map) and
-  party chat, owner only, quest accept/turn-in mirroring (see "Bot AI"). Compiles on Linux;
-  Windows build and runtime test pending.
+  party chat, owner only, quest accept/turn-in mirroring (see "Bot AI").
+- 2026-11-03, owner's test of build #10 (core `d6cd726` + `68dc852`): **works**: invite (after
+  the empty-guid fix), follow, stay/follow by whisper and by party chat, summon across maps,
+  leave. **Failed**: quest accept and turn-in mirroring; the step logs (`d88e455`) showed
+  `accept skipped, another class or race` -> class copies of quests (see "Bot AI"), fixed in
+  `65dae51`. Retest pending. Non-owner orders/invites not tested yet (no second account).
 
 ## Checking
 
