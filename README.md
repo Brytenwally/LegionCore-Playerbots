@@ -38,6 +38,10 @@ When you log out, the bots of your account (your alts) log out with you.
   starting zones) are taken in the bot's own class version. They pick the best reward they can use. If
   they can't take or turn in a quest (log full, level, previous quest, bags full, daily limit),
   they whisper you why.
+- **Quests by hand**, for class quests that are not copies of yours (Northshire's "Encrypted
+  Letter"): stand by the quest giver and whisper `quests available` (what the bot can take or
+  turn in there), `quest take <name>`, `quest complete <name>` (near the NPC that takes it back;
+  it is turned in whatever the bot's own objectives). You can paste a quest link as the name.
 
 ## Install
 

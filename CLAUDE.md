@@ -118,6 +118,18 @@ come first.
   `QuestSortID`, its class and race satisfied, a class-specific copy before an unrestricted one)
   and turns in the copy it has when the owner turns in his. Index built once from
   `sQuestDataStore->GetQuestTemplates()` (`std::call_once`).
+- **Manual quest orders** (owner's request, 2026-11-03), for class versions that are not copies:
+  `quests available` (the nearest quest giver within 30 yd: quests the bot can take there, and
+  quests of its log it can turn in there), `quest take <name>` (from a quest giver within 30 yd,
+  `AddQuestAndCheckCompletion(quest, giver)` so the giver's scripts run as for a client), `quest
+  complete <name>` (a quest of its log, to its ender within 30 yd; same turn-in as mirroring).
+  Quest givers = alive creatures / gameobjects whose entry has starter or ender relations
+  (`sQuestDataStore->Get{Creature,GO}Quest[Involved]RelationBounds`), found with
+  `GetCreatureListInGrid` and a `GameObjectListSearcher` cell visit, nearest first. Names: exact
+  title or quest id first, then the first title containing the text; a pasted quest link works
+  (text between [ ]). `TurnInQuest(bot, quest, giver, to)` is shared by mirroring and the order:
+  limits, bag room, `CompleteQuest` if needed (owner's rule: objectives do not matter),
+  `RewardQuest(quest, reward, giver or bot)`.
 
 ## Status
 
@@ -133,7 +145,13 @@ come first.
   the empty-guid fix), follow, stay/follow by whisper and by party chat, summon across maps,
   leave. **Failed**: quest accept and turn-in mirroring; the step logs (`d88e455`) showed
   `accept skipped, another class or race` -> class copies of quests (see "Bot AI"), fixed in
-  `65dae51`. Retest pending. Non-owner orders/invites not tested yet (no second account).
+  `65dae51`. Non-owner orders/invites not tested yet (no second account).
+- 2026-11-03, owner's test of build #12 (core `d6cd726` + `65dae51`): quest mirroring with class
+  copies **works** (bot takes and turns in its own class's copy, follows its chain). Owner then
+  found quests whose class versions are **not copies** (Northshire's "Encrypted Letter": other
+  classes have different quests with different titles/objectives that unlock the same zone
+  progression), which mirroring cannot match -> manual quest orders added (see "Bot AI"),
+  compile on Linux, Windows build and test pending.
 
 ## Checking
 

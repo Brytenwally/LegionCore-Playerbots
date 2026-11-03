@@ -17,6 +17,7 @@
 
 class Player;
 class Quest;
+class WorldObject;
 
 // Who gave an order, read in his own thread when he gave it: the bot runs the order in its own thread and
 // must not touch another map's player.
@@ -56,6 +57,14 @@ private:
     void LeaveGroup(Player* bot, OrderSender const& sender);
     // quests [all|incompleted|in|completed|co|summary]: whispers the quest log, as SkyFire's ListQuestsAction
     bool ListQuests(Player* bot, ObjectGuid const& to, std::string const& args);
+    // Manual quests, for quests whose class versions are not copies of the owner's (Northshire's
+    // "Encrypted Letter"): from the quest givers within QuestGiverRange of the bot.
+    void ListAvailableQuests(Player* bot, ObjectGuid const& to);
+    void TakeQuest(Player* bot, ObjectGuid const& to, std::string const& name);
+    void CompleteQuestOrder(Player* bot, ObjectGuid const& to, std::string const& name);
+    // Turns a quest of the bot's log in to giver (the bot itself when there is none), whatever its
+    // own objectives (owner's rule); refuses on bag space or daily/weekly limits, telling `to`.
+    bool TurnInQuest(Player* bot, Quest const* quest, WorldObject* giver, ObjectGuid const& to);
     void HandleGroupInvite(Player* bot);
     void UpdateFollow(Player* bot);
     void StopFollowing(Player* bot);

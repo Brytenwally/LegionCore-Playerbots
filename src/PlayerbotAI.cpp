@@ -5,8 +5,11 @@
 #include "PlayerbotAI.h"
 #include "DB2Stores.h"
 #include "Group.h"
+#include "CellImpl.h"
 #include "Creature.h"
 #include "GameObject.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 #include "ItemTemplate.h"
 #include "Log.h"
 #include "MotionMaster.h"
@@ -133,7 +136,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, quests [all|in|co|summary].");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -180,6 +183,24 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "leave")
     {
         LeaveGroup(bot, sender);
+        return true;
+    }
+
+    if (order == "quests available")
+    {
+        ListAvailableQuests(bot, sender.guid);
+        return true;
+    }
+
+    // the name keeps its case for the replies; matching is done in lower case
+    if (order.rfind("quest take ", 0) == 0)
+    {
+        TakeQuest(bot, sender.guid, text.substr(11));
+        return true;
+    }
+    if (order.rfind("quest complete ", 0) == 0)
+    {
+        CompleteQuestOrder(bot, sender.guid, text.substr(15));
         return true;
     }
 
@@ -508,38 +529,45 @@ void PlayerbotAI::MirrorQuestReward(Player* bot, ObjectGuid const& owner, Object
         status = bot->GetQuestStatus(questId);
     }
 
+    TurnInQuest(bot, quest, nullptr, owner);
+}
+
+bool PlayerbotAI::TurnInQuest(Player* bot, Quest const* quest, WorldObject* giver, ObjectGuid const& to)
+{
+    uint32 const questId = quest->GetQuestId();
     if (!bot->SatisfyQuestDay(quest, false) || !bot->SatisfyQuestWeek(quest) || !bot->SatisfyQuestSeasonal(quest))
     {
         LogQuest(bot, questId, "turn-in refused, daily/weekly/seasonal limit");
-        Say(bot, owner, "Can't turn in [" + quest->LogTitle + "]: I've reached the limit for this quest.");
-        return;
+        Say(bot, to, "Can't turn in [" + quest->LogTitle + "]: I've reached the limit for this quest.");
+        return false;
     }
 
     uint32 const reward = ChooseQuestReward(bot, quest);
     if (!QuestRewardsFit(bot, quest, reward))
     {
         LogQuest(bot, questId, "turn-in refused, no bag room for the reward");
-        Say(bot, owner, "Can't turn in [" + quest->LogTitle + "]: no room in my bags for the reward.");
-        return;
+        Say(bot, to, "Can't turn in [" + quest->LogTitle + "]: no room in my bags for the reward.");
+        return false;
     }
 
     // its own objectives do not matter (owner's rule): mark it complete, then hand it in. A quest that
     // rewards itself on completion is done after CompleteQuest.
-    if (status != QUEST_STATUS_COMPLETE)
+    if (bot->GetQuestStatus(questId) != QUEST_STATUS_COMPLETE)
     {
         bot->CompleteQuest(questId);
         if (bot->GetQuestRewardStatus(questId))
         {
-            LogQuest(bot, questId, "turned in with its owner (rewarded on completion)");
-            return;
+            LogQuest(bot, questId, "turned in (rewarded on completion)");
+            return true;
         }
     }
 
-    // the hook does not say where the owner turned it in: the bot stands in as the quest giver, as for a
-    // quest turned in from the quest log
-    bot->RewardQuest(quest, reward, bot, true);
-    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turned in with its owner (reward item %u, rewarded %u)",
+    // without a giver (the hook does not name the owner's) the bot stands in, as for a quest turned in
+    // from the quest log
+    bot->RewardQuest(quest, reward, giver ? static_cast<Object*>(giver) : static_cast<Object*>(bot), true);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turned in (reward item %u, rewarded %u)",
         bot->GetName(), questId, reward, uint32(bot->GetQuestRewardStatus(questId)));
+    return true;
 }
 
 uint32 PlayerbotAI::ChooseQuestReward(Player* bot, Quest const* quest) const
@@ -619,4 +647,209 @@ bool PlayerbotAI::QuestRewardsFit(Player* bot, Quest const* quest, uint32 reward
             return false;
 
     return true;
+}
+
+namespace
+{
+    float const QuestGiverRange = 30.0f;                    // the owner stands at the NPC, the bot follows him
+
+    // every object in range: creatures and gameobjects whose entry starts or ends quests are kept below
+    struct AnyGameObjectInRange
+    {
+        WorldObject const* me;
+        float range;
+        bool operator()(GameObject* go) const { return me->IsWithinDistInMap(go, range); }
+    };
+
+    struct QuestGiver
+    {
+        WorldObject* object;
+        QuestRelationBounds starts;
+        QuestRelationBounds ends;
+    };
+
+    // the quest givers around the bot, nearest first
+    std::vector<QuestGiver> FindQuestGivers(Player* bot)
+    {
+        std::vector<QuestGiver> givers;
+
+        std::list<Creature*> creatures;
+        bot->GetCreatureListInGrid(creatures, QuestGiverRange);
+        for (Creature* creature : creatures)
+        {
+            if (!creature->IsAlive())
+                continue;
+            QuestRelationBounds starts = sQuestDataStore->GetCreatureQuestRelationBounds(creature->GetEntry());
+            QuestRelationBounds ends = sQuestDataStore->GetCreatureQuestInvolvedRelationBounds(creature->GetEntry());
+            if (starts.first != starts.second || ends.first != ends.second)
+                givers.push_back({ creature, starts, ends });
+        }
+
+        std::list<GameObject*> objects;
+        AnyGameObjectInRange check{ bot, QuestGiverRange };
+        Trinity::GameObjectListSearcher<AnyGameObjectInRange> searcher(bot, objects, check);
+        CellCoord pair(Trinity::ComputeCellCoord(bot->GetPositionX(), bot->GetPositionY()));
+        Cell cell(pair);
+        cell.SetNoCreate();
+        cell.Visit(pair, Trinity::makeGridVisitor(searcher), *bot->GetMap(), *bot, QuestGiverRange);
+        for (GameObject* go : objects)
+        {
+            QuestRelationBounds starts = sQuestDataStore->GetGOQuestRelationBounds(go->GetEntry());
+            QuestRelationBounds ends = sQuestDataStore->GetGOQuestInvolvedRelationBounds(go->GetEntry());
+            if (starts.first != starts.second || ends.first != ends.second)
+                givers.push_back({ go, starts, ends });
+        }
+
+        std::sort(givers.begin(), givers.end(), [bot](QuestGiver const& a, QuestGiver const& b)
+        {
+            return bot->GetDistance(a.object) < bot->GetDistance(b.object);
+        });
+        return givers;
+    }
+
+    // "Encrypted Letter", a quest link pasted in chat ("|Hquest:...|h[Encrypted Letter]|h|r") or a quest id
+    std::string QuestNameFrom(std::string text)
+    {
+        std::string::size_type open = text.find('[');
+        std::string::size_type close = text.find(']', open == std::string::npos ? 0 : open);
+        if (open != std::string::npos && close != std::string::npos)
+            text = text.substr(open + 1, close - open - 1);
+        return Lower(text);
+    }
+
+    // exact title (or id) first, then the first title containing the name
+    template<class Candidates>
+    Quest const* MatchQuest(Candidates const& questIds, std::string const& name)
+    {
+        Quest const* partial = nullptr;
+        for (uint32 id : questIds)
+        {
+            Quest const* quest = sQuestDataStore->GetQuestTemplate(id);
+            if (!quest)
+                continue;
+            std::string const title = Lower(quest->LogTitle);
+            if (title == name || std::to_string(id) == name)
+                return quest;
+            if (!partial && !name.empty() && title.find(name) != std::string::npos)
+                partial = quest;
+        }
+        return partial;
+    }
+
+    std::string GiverName(WorldObject* object)
+    {
+        return object->GetName();
+    }
+}
+
+// quests available: the quests the nearest quest giver offers that the bot can take, and the ones of
+// its log that the giver takes back
+void PlayerbotAI::ListAvailableQuests(Player* bot, ObjectGuid const& to)
+{
+    std::vector<QuestGiver> const givers = FindQuestGivers(bot);
+    if (givers.empty())
+    {
+        Say(bot, to, "There is no quest giver near me.");
+        return;
+    }
+
+    QuestGiver const& giver = givers.front();
+    std::string available;
+    for (auto itr = giver.starts.first; itr != giver.starts.second; ++itr)
+    {
+        Quest const* quest = sQuestDataStore->GetQuestTemplate(itr->second);
+        if (!quest || bot->GetQuestStatus(quest->GetQuestId()) != QUEST_STATUS_NONE || !bot->CanTakeQuest(quest, false))
+            continue;
+        available += (available.empty() ? "[" : ", [") + quest->LogTitle + "]";
+    }
+
+    std::string turnIn;
+    for (auto itr = giver.ends.first; itr != giver.ends.second; ++itr)
+    {
+        QuestStatus const status = bot->GetQuestStatus(itr->second);
+        if (status != QUEST_STATUS_INCOMPLETE && status != QUEST_STATUS_COMPLETE)
+            continue;
+        if (Quest const* quest = sQuestDataStore->GetQuestTemplate(itr->second))
+            turnIn += (turnIn.empty() ? "[" : ", [") + quest->LogTitle + "]";
+    }
+
+    Say(bot, to, GiverName(giver.object) + ": " + (available.empty() ? std::string("no quest I can take") : "I can take " + available)
+        + (turnIn.empty() ? std::string(".") : "; I can turn in " + turnIn + "."));
+}
+
+// quest take <name>: from a quest giver near the bot, as a client accepting it there
+void PlayerbotAI::TakeQuest(Player* bot, ObjectGuid const& to, std::string const& text)
+{
+    std::string const name = QuestNameFrom(text);
+    for (QuestGiver const& giver : FindQuestGivers(bot))
+    {
+        std::vector<uint32> offered;
+        for (auto itr = giver.starts.first; itr != giver.starts.second; ++itr)
+            offered.push_back(itr->second);
+
+        Quest const* quest = MatchQuest(offered, name);
+        if (!quest)
+            continue;
+
+        uint32 const questId = quest->GetQuestId();
+        if (bot->GetQuestStatus(questId) != QUEST_STATUS_NONE || bot->GetQuestRewardStatus(questId))
+        {
+            Say(bot, to, "I already have or did [" + quest->LogTitle + "].");
+            return;
+        }
+
+        if (!bot->CanTakeQuest(quest, false) || !bot->CanAddQuest(quest, false))
+        {
+            char const* reason = "I can't take it";
+            if (bot->FindQuestSlot(0) >= MAX_QUEST_LOG_SIZE)
+                reason = "my quest log is full";
+            else if (!bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
+                reason = "it is not for my class or race";
+            else if (!bot->SatisfyQuestLevel(quest, false))
+                reason = "my level is too low";
+            else if (!bot->SatisfyQuestPreviousQuest(quest, false))
+                reason = "I haven't done the quest before it";
+            else if (!bot->CanAddQuest(quest, false))
+                reason = "no room in my bags for its item";
+            LogQuest(bot, questId, (std::string("manual take refused: ") + reason).c_str());
+            Say(bot, to, "Can't take [" + quest->LogTitle + "]: " + reason + ".");
+            return;
+        }
+
+        // with its giver, as a client: the giver's scripts run for the bot's own accept
+        bot->AddQuestAndCheckCompletion(quest, giver.object);
+        LogQuest(bot, questId, "taken by order");
+        Say(bot, to, "Took [" + quest->LogTitle + "].");
+        return;
+    }
+
+    Say(bot, to, "No quest giver near me offers \"" + text + "\". Try: quests available");
+}
+
+// quest complete <name>: turns a quest of its log in to its turn-in NPC or object near the bot
+void PlayerbotAI::CompleteQuestOrder(Player* bot, ObjectGuid const& to, std::string const& text)
+{
+    std::string const name = QuestNameFrom(text);
+    std::vector<uint32> inLog;
+    for (uint16 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
+        if (uint32 questId = bot->GetQuestSlotQuestId(slot))
+            inLog.push_back(questId);
+
+    Quest const* quest = MatchQuest(inLog, name);
+    if (!quest)
+    {
+        Say(bot, to, "I have no quest \"" + text + "\". Try: quests all");
+        return;
+    }
+
+    for (QuestGiver const& giver : FindQuestGivers(bot))
+        for (auto itr = giver.ends.first; itr != giver.ends.second; ++itr)
+            if (itr->second == quest->GetQuestId())
+            {
+                if (TurnInQuest(bot, quest, giver.object, to))
+                    Say(bot, to, "Turned in [" + quest->LogTitle + "].");
+                return;
+            }
+
+    Say(bot, to, "I'm not near the one who takes [" + quest->LogTitle + "] back.");
 }
