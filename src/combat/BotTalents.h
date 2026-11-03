@@ -3,8 +3,8 @@
  * and made generic. Not used yet.
  *
  * Fills only empty, unlocked talent rows and never replaces a talent already chosen, so a
- * player's own choices on an alt stay. Owner's alt rule: nothing calls this on an alt unless the
- * player orders it.
+ * player's own choices on an alt stay. Owner's decision (2026-11-03): talents are learned
+ * automatically on every bot, alts included, into empty rows only.
  */
 
 #ifndef MOD_PLAYERBOTS_BOTTALENTS_H

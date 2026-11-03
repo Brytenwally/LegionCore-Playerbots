@@ -164,8 +164,8 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
   dispel effects), `KeepAura`, `UseBagItem` (on-use spell cast with the item, so the core takes the
   charge; LegionBotAI destroyed the item by hand).
 - `BotTalents`: `UnlockedRows`, `TalentInRow`, `TalentAt(tier, column)`, `LearnTalents` /
-  `LearnTalentColumns`: only empty unlocked rows, never replaces a chosen talent. Alt rule: call
-  only on an order for alts.
+  `LearnTalentColumns`: only empty unlocked rows, never replaces a chosen talent, so it may run
+  automatically on alts too (owner's decision below).
 - `BotMovement`: role formation (tank 2.5 yd, dps 4 yd left/right, healer 9 yd behind the leader,
   ground Z), `MoveToFormation`, `CatchUp` (near teleport past 80 yd or 3 yd of height), `Engage`
   (attack + chase, melee or at range), `Disengage`.
