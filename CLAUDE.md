@@ -142,6 +142,29 @@ come first.
   limits, bag room, `CompleteQuest` if needed (owner's rule: objectives do not matter),
   `RewardQuest(quest, reward, giver or bot)`.
 
+## Combat building blocks (`src/combat/`, from LegionBotAI, not used yet)
+
+Owner's request (2026-11-03): copy LegionBotAI's generic functions as an empty structure before
+writing combat, without its content (rotations, spell lists, gear sets, talent picks) and without
+what conflicts with the module (its follow, map transfer by hand, settings table, level sync and
+gear, looting, LFG, revive). Nothing calls them yet; plan step 4 wires them into `PlayerbotAI`.
+All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group slots +
+`ObjectAccessor::GetPlayer(*bot, guid)`, same map only) instead of LegionBotAI's `FindPlayer`.
+- `BotCombat` (`BotCombat.h`): `RoleOf` (spec role), `BotCast` (what casting means: spell exists,
+  level, learned, cooldown, GCD, not casting, `SpellThrottle` AI delay, face, `CastSpell` not
+  triggered) returning a `CastRefusal` for the cast logs, `IsAttackingAlly` / `IsAggressorOf` /
+  `FindAttackerOf` (never-pull rule), `CountInjured`, `FindLowestHpAlly` (tank first), `EngageTimer`
+  (1.2 s engage delay), `GetInterruptibleCast` / `TryInterrupt`, `TryDispel` (types from the spell's
+  dispel effects), `KeepAura`, `UseBagItem` (on-use spell cast with the item, so the core takes the
+  charge; LegionBotAI destroyed the item by hand).
+- `BotTalents`: `UnlockedRows`, `TalentInRow`, `TalentAt(tier, column)`, `LearnTalents` /
+  `LearnTalentColumns`: only empty unlocked rows, never replaces a chosen talent. Alt rule: call
+  only on an order for alts.
+- `BotMovement`: role formation (tank 2.5 yd, dps 4 yd left/right, healer 9 yd behind the leader,
+  ground Z), `MoveToFormation`, `CatchUp` (near teleport past 80 yd or 3 yd of height), `Engage`
+  (attack + chase, melee or at range), `Disengage`.
+- Compiled in the container against the core (scripts PCH), 2026-11-03.
+
 ## Status
 
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the
