@@ -393,25 +393,32 @@ namespace
         return itr != index.end() && itr->second.size() > 1 ? &itr->second : nullptr;
     }
 
-    // the bot's own copy of a quest it cannot take; a class-specific copy first, an unrestricted one after
+    // The bot's own copy of a quest it cannot take. Copies are told apart by class (AllowableClasses) or
+    // only by their previous quest: Northshire's "They Sent Assassins" is nine quests, eight without a
+    // class, each following one class's "Join the Battle!". So the copy the bot can take now comes first
+    // (its previous quest done), a class-specific one before an unrestricted one; failing that, the same
+    // order among those its class and race allow, so the refusal names the real reason.
     Quest const* FindCopyToTake(Player* bot, Quest const* quest)
     {
         std::vector<uint32> const* copies = GetQuestCopies(quest);
         if (!copies)
             return nullptr;
 
-        Quest const* unrestricted = nullptr;
+        Quest const* best = nullptr;
+        int bestRank = -1;
         for (uint32 id : *copies)
         {
             Quest const* copy = id != quest->GetQuestId() ? sQuestDataStore->GetQuestTemplate(id) : nullptr;
             if (!copy || !bot->SatisfyQuestClass(copy, false) || !bot->SatisfyQuestRace(copy, false))
                 continue;
-            if (copy->AllowableClasses)
-                return copy;
-            if (!unrestricted)
-                unrestricted = copy;
+            int const rank = (bot->CanTakeQuest(copy, false) ? 2 : 0) + (copy->AllowableClasses ? 1 : 0);
+            if (rank > bestRank)
+            {
+                best = copy;
+                bestRank = rank;
+            }
         }
-        return unrestricted;
+        return best;
     }
 
     // the copy of the owner's quest that the bot has in its log
@@ -717,23 +724,39 @@ namespace
         return Lower(text);
     }
 
-    // exact title (or id) first, then the first title containing the name
-    template<class Candidates>
-    Quest const* MatchQuest(Candidates const& questIds, std::string const& name)
+    // Exact title (or id) before a title containing the name. Several quests may share a title (class
+    // copies, all offered by the same NPC): `preferred` picks among them, e.g. the one the bot can take.
+    template<class Candidates, class Preferred>
+    Quest const* MatchQuest(Candidates const& questIds, std::string const& name, Preferred preferred)
     {
-        Quest const* partial = nullptr;
+        Quest const* best = nullptr;
+        int bestRank = -1;
         for (uint32 id : questIds)
         {
             Quest const* quest = sQuestDataStore->GetQuestTemplate(id);
             if (!quest)
                 continue;
+
             std::string const title = Lower(quest->LogTitle);
-            if (title == name || std::to_string(id) == name)
-                return quest;
-            if (!partial && !name.empty() && title.find(name) != std::string::npos)
-                partial = quest;
+            int rank;
+            if (std::to_string(id) == name)
+                rank = 4;                                   // a quest id names exactly one quest
+            else if (title == name)
+                rank = 2;
+            else if (!name.empty() && title.find(name) != std::string::npos)
+                rank = 0;
+            else
+                continue;
+
+            if (rank < 4 && preferred(quest))
+                ++rank;
+            if (rank > bestRank)
+            {
+                best = quest;
+                bestRank = rank;
+            }
         }
-        return partial;
+        return best;
     }
 
     std::string GiverName(WorldObject* object)
@@ -787,7 +810,11 @@ void PlayerbotAI::TakeQuest(Player* bot, ObjectGuid const& to, std::string const
         for (auto itr = giver.starts.first; itr != giver.starts.second; ++itr)
             offered.push_back(itr->second);
 
-        Quest const* quest = MatchQuest(offered, name);
+        // among copies of the same title the giver offers, the one the bot can take now
+        Quest const* quest = MatchQuest(offered, name, [bot](Quest const* q)
+        {
+            return bot->GetQuestStatus(q->GetQuestId()) == QUEST_STATUS_NONE && bot->CanTakeQuest(q, false);
+        });
         if (!quest)
             continue;
 
@@ -835,7 +862,7 @@ void PlayerbotAI::CompleteQuestOrder(Player* bot, ObjectGuid const& to, std::str
         if (uint32 questId = bot->GetQuestSlotQuestId(slot))
             inLog.push_back(questId);
 
-    Quest const* quest = MatchQuest(inLog, name);
+    Quest const* quest = MatchQuest(inLog, name, [](Quest const*) { return false; });
     if (!quest)
     {
         Say(bot, to, "I have no quest \"" + text + "\". Try: quests all");

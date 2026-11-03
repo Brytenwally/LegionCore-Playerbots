@@ -115,8 +115,18 @@ come first.
   29078, 31139, each limited by `quest_template_addon.AllowableClasses` (128, 2, 16, 8, 256, 1, 4,
   0, 512) and leading to its own class's next quest. A bot of another class refused the owner's
   copy ("another class or race"). Now the bot takes **its own copy** (same `LogTitle` and
-  `QuestSortID`, its class and race satisfied, a class-specific copy before an unrestricted one)
-  and turns in the copy it has when the owner turns in his. Index built once from
+  `QuestSortID`, its class and race satisfied) and turns in the copy it has when the owner turns
+  in his.
+  - **Copies told apart only by their previous quest** (found 2026-11-03, owner's log: `quest
+    28795: takes its own class/race copy, quest 28794 ... accept refused: I haven't done the quest
+    before it`): Northshire's "They Sent Assassins" is 28791-28797, 29081, 31144; only 28795 has
+    `AllowableClasses` (8, rogue), the others have 0 and differ by `PrevQuestID` (each follows one
+    class's "Join the Battle!", 28780/28784/.../28788/...). Picking "the first copy the class
+    allows" chose another class's chain. **Rule: among copies, choose the one the bot can take
+    now (`CanTakeQuest`: previous quest done), class-specific before unrestricted**; same for
+    `quest take` (`MatchQuest` prefers, among equal title matches, the quest the bot can take),
+    since the NPC offers every copy. `quests available` was already right (lists only quests
+    `CanTakeQuest` accepts). Index built once from
   `sQuestDataStore->GetQuestTemplates()` (`std::call_once`).
 - **Manual quest orders** (owner's request, 2026-11-03), for class versions that are not copies:
   `quests available` (the nearest quest giver within 30 yd: quests the bot can take there, and
@@ -150,8 +160,12 @@ come first.
   copies **works** (bot takes and turns in its own class's copy, follows its chain). Owner then
   found quests whose class versions are **not copies** (Northshire's "Encrypted Letter": other
   classes have different quests with different titles/objectives that unlock the same zone
-  progression), which mirroring cannot match -> manual quest orders added (see "Bot AI"),
-  compile on Linux, Windows build and test pending.
+  progression), which mirroring cannot match -> manual quest orders added (see "Bot AI").
+- 2026-11-03, owner's test of build #13 (core `383be28` + `14c2715`): `quests available`, `quest
+  take`, `quest complete` **work** (warlock bot did its "Tainted Letter" and "Join the Battle!" by
+  order). "They Sent Assassins" was refused both mirrored and by `quest take` although `quests
+  available` listed it: wrong copy chosen (previous-quest copies, see "Bot AI"); fixed, build
+  and retest pending.
 
 ## Checking
 
