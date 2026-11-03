@@ -165,8 +165,10 @@ come first.
 - 2026-11-03, owner's test of build #13 (core `383be28` + `14c2715`): `quests available`, `quest
   take`, `quest complete` **work** (warlock bot did its "Tainted Letter" and "Join the Battle!" by
   order). "They Sent Assassins" was refused both mirrored and by `quest take` although `quests
-  available` listed it: wrong copy chosen (previous-quest copies, see "Bot AI"); fixed, build
-  and retest pending.
+  available` listed it: wrong copy chosen (previous-quest copies, see "Bot AI"); fixed.
+- 2026-11-03, owner's test of build #14 (core `66e10fd` + `d935051`): **everything works**
+  (previous-quest copies taken mirrored and by order). Step 3's group/orders/quests part is done;
+  next: basic combat (owner: from LegionBotAI, see the core's `CLAUDE.md`).
 
 ## Checking
 
