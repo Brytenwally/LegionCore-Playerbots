@@ -34,7 +34,8 @@ When you log out, the bots of your account (your alts) log out with you.
   raid chat to all your bots in the group at once. Bots only obey their owner: the player who
   added them, or a character of their own account. They confirm by whisper.
 - **Quests**: bots in your group take the quests you take, and turn a quest in when you do, even
-  if they did not finish its objectives themselves. They pick the best reward they can use. If
+  if they did not finish its objectives themselves. Quests that exist once per class (most
+  starting zones) are taken in the bot's own class version. They pick the best reward they can use. If
   they can't take or turn in a quest (log full, level, previous quest, bags full, daily limit),
   they whisper you why.
 

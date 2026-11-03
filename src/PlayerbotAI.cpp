@@ -19,6 +19,9 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include <algorithm>
+#include <map>
+#include <mutex>
+#include <vector>
 #include <cctype>
 
 namespace
@@ -341,6 +344,72 @@ namespace
     {
         TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: %s", bot->GetName(), questId, what);
     }
+
+    // Many quests exist once per class (or race): the Northshire starting quests, for instance, are nine
+    // quests titled "Beating Them Back!", each limited to one class by AllowableClasses and leading to that
+    // class's next quest. A bot of another class than its owner takes its own copy: the quest with the same
+    // title in the same zone (QuestSortID) that its class and race can take.
+    typedef std::map<std::pair<int32, std::string>, std::vector<uint32>> QuestCopyIndex;
+
+    QuestCopyIndex const& GetQuestCopyIndex()
+    {
+        static QuestCopyIndex index;
+        static std::once_flag built;
+        std::call_once(built, []()
+        {
+            for (auto const& pair : sQuestDataStore->GetQuestTemplates())
+                if (Quest const* quest = pair.second)
+                    if (!quest->LogTitle.empty())
+                        index[std::make_pair(quest->QuestSortID, quest->LogTitle)].push_back(quest->GetQuestId());
+        });
+        return index;
+    }
+
+    std::vector<uint32> const* GetQuestCopies(Quest const* quest)
+    {
+        QuestCopyIndex const& index = GetQuestCopyIndex();
+        auto itr = index.find(std::make_pair(quest->QuestSortID, quest->LogTitle));
+        return itr != index.end() && itr->second.size() > 1 ? &itr->second : nullptr;
+    }
+
+    // the bot's own copy of a quest it cannot take; a class-specific copy first, an unrestricted one after
+    Quest const* FindCopyToTake(Player* bot, Quest const* quest)
+    {
+        std::vector<uint32> const* copies = GetQuestCopies(quest);
+        if (!copies)
+            return nullptr;
+
+        Quest const* unrestricted = nullptr;
+        for (uint32 id : *copies)
+        {
+            Quest const* copy = id != quest->GetQuestId() ? sQuestDataStore->GetQuestTemplate(id) : nullptr;
+            if (!copy || !bot->SatisfyQuestClass(copy, false) || !bot->SatisfyQuestRace(copy, false))
+                continue;
+            if (copy->AllowableClasses)
+                return copy;
+            if (!unrestricted)
+                unrestricted = copy;
+        }
+        return unrestricted;
+    }
+
+    // the copy of the owner's quest that the bot has in its log
+    Quest const* FindCopyInLog(Player* bot, Quest const* quest)
+    {
+        std::vector<uint32> const* copies = GetQuestCopies(quest);
+        if (!copies)
+            return nullptr;
+
+        for (uint32 id : *copies)
+        {
+            if (id == quest->GetQuestId())
+                continue;
+            QuestStatus const status = bot->GetQuestStatus(id);
+            if ((status == QUEST_STATUS_INCOMPLETE || status == QUEST_STATUS_COMPLETE) && !bot->GetQuestRewardStatus(id))
+                return sQuestDataStore->GetQuestTemplate(id);
+        }
+        return nullptr;
+    }
 }
 
 void PlayerbotAI::MirrorQuestAccept(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId)
@@ -353,6 +422,22 @@ void PlayerbotAI::MirrorQuestAccept(Player* bot, ObjectGuid const& owner, Object
     {
         LogQuest(bot, questId, "accept skipped, not in the owner's group");
         return;
+    }
+
+    // the owner's copy is for another class or race: the bot takes its own copy of the same quest
+    if (!bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
+    {
+        Quest const* copy = FindCopyToTake(bot, quest);
+        if (!copy)
+        {
+            LogQuest(bot, questId, "accept skipped, another class or race and no copy for the bot's");
+            return;
+        }
+
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: takes its own class/race copy, quest %u",
+            bot->GetName(), questId, copy->GetQuestId());
+        quest = copy;
+        questId = copy->GetQuestId();
     }
 
     // already on it or done with it, or a quest of another class / race: nothing to say
@@ -404,12 +489,23 @@ void PlayerbotAI::MirrorQuestReward(Player* bot, ObjectGuid const& owner, Object
         return;
     }
 
-    QuestStatus const status = bot->GetQuestStatus(questId);
+    QuestStatus status = bot->GetQuestStatus(questId);
     if ((status != QUEST_STATUS_INCOMPLETE && status != QUEST_STATUS_COMPLETE) || bot->GetQuestRewardStatus(questId))
     {
-        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turn-in skipped, not in its log (status %u, rewarded %u)",
-            bot->GetName(), questId, uint32(status), uint32(bot->GetQuestRewardStatus(questId)));
-        return;
+        // the bot may have its own class/race copy of the owner's quest
+        Quest const* copy = FindCopyInLog(bot, quest);
+        if (!copy)
+        {
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turn-in skipped, not in its log (status %u, rewarded %u)",
+                bot->GetName(), questId, uint32(status), uint32(bot->GetQuestRewardStatus(questId)));
+            return;
+        }
+
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s', quest %u: turns in its own class/race copy, quest %u",
+            bot->GetName(), questId, copy->GetQuestId());
+        quest = copy;
+        questId = copy->GetQuestId();
+        status = bot->GetQuestStatus(questId);
     }
 
     if (!bot->SatisfyQuestDay(quest, false) || !bot->SatisfyQuestWeek(quest) || !bot->SatisfyQuestSeasonal(quest))

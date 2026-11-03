@@ -102,10 +102,15 @@ come first.
   mirrored. Note: the core calls `OnQuestAccept(player, quest)` only for accepts with a quest
   giver (`AddQuestAndCheckCompletion` returns early without one).
   Every step is logged (`[mod-playerbots] <owner> accepted|turned in quest N: passed to n bot(s)`,
-  then per bot `Bot 'X', quest N: accepted / turned in / ... skipped, <reason>`). 2026-11-02: the
-  owner reported bots neither accepting nor turning in with him while invite/follow/orders/summon
-  /leave worked (build #10); the hooks and posting were read and look right, the logs were added
-  to find where it stops.
+  then per bot `Bot 'X', quest N: accepted / turned in / ... skipped, <reason>`).
+- **Class/race copies of quests** (found 2026-11-03 from those logs): this database has many
+  quests once per class, e.g. Northshire's "Beating Them Back!" is quests 28757, 28762-28767,
+  29078, 31139, each limited by `quest_template_addon.AllowableClasses` (128, 2, 16, 8, 256, 1, 4,
+  0, 512) and leading to its own class's next quest. A bot of another class refused the owner's
+  copy ("another class or race"). Now the bot takes **its own copy** (same `LogTitle` and
+  `QuestSortID`, its class and race satisfied, a class-specific copy before an unrestricted one)
+  and turns in the copy it has when the owner turns in his. Index built once from
+  `sQuestDataStore->GetQuestTemplates()` (`std::call_once`).
 
 ## Status
 
