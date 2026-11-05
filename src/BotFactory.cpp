@@ -17,10 +17,14 @@
 #include "PlayerbotMgr.h"
 #include "Random.h"
 #include "ScriptMgr.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "World.h"
 #include "WorldSession.h"
 #include <algorithm>
 #include <cctype>
+#include <mutex>
+#include <set>
 
 namespace BotFactory
 {
@@ -67,6 +71,78 @@ namespace BotFactory
                     return name;
             }
             return std::string();
+        }
+
+        // Talent builds (owner's file Talents.txt, 2026-11-05: leveling guides, one talent per row from
+        // the 15/30/45/60/75/90/100 rows; DK rows 56/57/58/60/75/90/100). Names are matched against the
+        // spell of each talent of the row, so the column does not matter. Monk rows in the file only
+        // describe changes: the picks there are taken from that text (marked). Warrior and Demon Hunter
+        // builds were not in the file: random until they come.
+        struct TalentBuild
+        {
+            uint32 specId;
+            char const* names[MAX_TALENT_TIERS];
+        };
+        TalentBuild const TalentBuilds[] =
+        {
+            { 250, { "Bloodworms", "Rapid Decomposition", "Ossuary", "Red Thirst", "Tremble Before Me", "Foul Bulwark", "Bonestorm" } },
+            { 251, { "Shattering Strikes", "Freezing Fog", "Icecap", "Abomination's Might", "Permafrost", "Frostscythe", "Obliteration" } },
+            { 252, { "All Will Serve", "Pestilent Pustules", "Unholy Frenzy", "Sludge Belcher", "Corpse Shield", "Shadow Infusion", "Defile" } },
+            { 102, { "Force of Nature", "Renewal", "Restoration Affinity", "Typhoon", "Soul of the Forest", "Astral Communion", "Fury of Elune" } },
+            { 103, { "Predator", "Wild Charge", "Restoration Affinity", "Mighty Bash", "Savage Roar", "Elune's Guidance", "Brutal Slash" } },
+            { 104, { "Brambles", "Wild Charge", "Restoration Affinity", "Mighty Bash", "Incarnation: Guardian of Ursoc", "Guardian of Elune", "Rend and Tear" } },
+            { 105, { "Cenarion Ward", "Renewal", "Guardian Affinity", "Typhoon", "Cultivation", "Germination", "Flourish" } },
+            { 253, { "Way of the Cobra", "Stomp", "Posthaste", "Bestial Fury", "Binding Shot", "A Murder of Crows", "Aspect of the Beast" } },
+            { 254, { "Lone Wolf", "Black Arrow", "Posthaste", "Patient Sniper", "Camouflage", "Barrage", "Sidewinders" } },
+            { 255, { "Throwing Axes", "Snake Hunter", "Posthaste", "Improved Traps", "Camouflage", "Dragonsfire Grenade", "Expert Trapper" } },
+            { 62,  { "Presence of Mind", "Shimmer", "Rune of Power", "Supernova", "Ice Floes", "Nether Tempest", "Arcane Orb" } },
+            { 63,  { "Conflagration", "Shimmer", "Incanter's Flow", "Blast Wave", "Ice Floes", "Unstable Magic", "Meteor" } },
+            { 64,  { "Ray of Frost", "Cold Snap", "Incanter's Flow", "Ice Nova", "Ice Floes", "Frost Bomb", "Comet Storm" } },
+            // Monk: chosen from the file's descriptions of each row
+            { 268, { "Eye of the Tiger", "Chi Torpedo", "Light Brewing", "Leg Sweep", "Healing Elixir", "Invoke Niuzao, the Black Ox", "Elusive Dance" } },
+            { 269, { "Eye of the Tiger", "Chi Torpedo", "Ascension", "Leg Sweep", "Healing Elixir", "Hit Combo", "Whirling Dragon Punch" } },
+            { 270, { "Chi Burst", "Chi Torpedo", "Mist Wrap", "Leg Sweep", "Healing Elixir", "Refreshing Jade Wind", "Mana Tea" } },
+            // Holy Paladin: the file's dungeon picks where it gives them (Bestow Faith, Holy Avenger; bots heal
+            // groups), Beacon of the Lightbringer (Beacon of Virtue would replace the rotation's Beacon of Light)
+            { 65,  { "Bestow Faith", "Unbreakable Spirit", "Fist of Justice", "Devotion Aura", "Holy Avenger", "Sanctified Wrath", "Beacon of the Lightbringer" } },
+            { 66,  { "Crusader's Judgment", "Blessed Hammer", "Blinding Light", "Blessing of Spellwarding", "Knight Templar", "Aegis of Light", "Seraphim" } },
+            { 70,  { "Final Verdict", "The Fires of Justice", "Fist of Justice", "Virtue's Blade", "Justicar's Vengeance", "Divine Steed", "Divine Purpose" } },
+            // Discipline: the file's suggestions (Castigation, Halo, Grace among its options)
+            { 256, { "Castigation", "Angelic Feather", "Shining Force", "Mindbender", "Contrition", "Halo", "Grace" } },
+            // Holy Priest: no row 30 in the file (Angelic Feather); row 100 "pick your favorite" (Circle of Healing, for 5-mans)
+            { 257, { "Trail of Light", "Angelic Feather", "Censure", "Light of the Naaru", "Surge of Light", "Divinity", "Circle of Healing" } },
+            { 258, { "Shadow Word: Void", "Body and Soul", "Mind Bomb", "Void Lord", "San'layn", "Shadow Crash", "Mind Spike" } },
+            { 262, { "Totem Mastery", "Ancestral Guidance", "Voodoo Totem", "Elemental Blast", "Icefury", "Storm Elemental", "Lightning Rod" } },
+            { 263, { "Boulderfist", "Rainfall", "Voodoo Totem", "Lightning Shield", "Tempest", "Crashing Storm", "Landslide" } },
+            { 264, { "Unleash Life", "Graceful Spirit", "Voodoo Totem", "Deluge", "Earthen Shield Totem", "Echo of the Elements", "High Tide" } },
+            { 259, { "Master Poisoner", "Nightstalker", "Anticipation", "Leeching Poison", "Prey on the Weak", "Agonizing Poison", "Marked for Death" } },
+            { 260, { "Swordmaster", "Grappling Hook", "Vigor", "Iron Stomach", "Parley", "Killing Spree", "Marked for Death" } },
+            { 261, { "Gloomblade", "Subterfuge", "Vigor", "Soothing Darkness", "Strike from the Shadows", "Premeditation", "Marked for Death" } },
+            // Warlock row 90: "Supremacy" as the file describes it; Demonology's Grimoire of Service
+            { 265, { "Haunt", "Absolute Corruption", "Demon Skin", "Siphon Life", "Burning Rush", "Grimoire of Supremacy", "Soul Conduit" } },
+            { 266, { "Shadowflame", "Improved Dreadstalkers", "Demon Skin", "Power Trip", "Burning Rush", "Grimoire of Service", "Summon Darkglare" } },
+            { 267, { "Roaring Blaze", "Reverse Entropy", "Demon Skin", "Eradication", "Burning Rush", "Grimoire of Supremacy", "Soul Conduit" } },
+        };
+
+        char const* BuildTalentName(uint32 spec, uint8 tier)
+        {
+            for (TalentBuild const& build : TalentBuilds)
+                if (build.specId == spec)
+                    return build.names[tier];
+            return nullptr;
+        }
+
+        // the talent of the row whose spell carries that name, for the bot's class and spec
+        uint32 TalentNamed(Player* bot, uint8 tier, char const* name)
+        {
+            std::string const wanted = Lower(name);
+            for (uint8 column = 0; column < MAX_TALENT_COLUMNS; ++column)
+                if (uint32 talentId = BotTalents::TalentAt(bot, tier, column))
+                    if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
+                        if (SpellInfo const* spell = sSpellMgr->GetSpellInfo(talent->SpellID))
+                            if (spell->SpellName && Lower(spell->SpellName) == wanted)
+                                return talentId;
+            return 0;
         }
 
         // an account <prefix><n> with room for one more character, created when needed
@@ -288,7 +364,24 @@ namespace BotFactory
             if (BotTalents::TalentInRow(bot, tier))
                 continue;
 
-            // no talent builds yet (to come from the owner): a random column of the row
+            // the spec's build (owner's Talents.txt); a name missing from the row on this core is logged once
+            // and the row gets a random column, as for specs with no build (warriors, demon hunters)
+            uint32 const spec = bot->GetSpecializationId();
+            if (char const* name = BuildTalentName(spec, tier))
+            {
+                if (uint32 talent = TalentNamed(bot, tier, name))
+                {
+                    picks[tier] = talent;
+                    continue;
+                }
+                static std::mutex logLock;
+                static std::set<uint32> logged;
+                std::lock_guard<std::mutex> lock(logLock);
+                if (logged.insert(spec * 10 + tier).second)
+                    TC_LOG_ERROR("server.loading", "[mod-playerbots] Talent build of spec %u: no talent '%s' in row %u, a random one is taken.",
+                        spec, name, uint32(tier + 1));
+            }
+
             std::vector<uint32> choices;
             for (uint8 column = 0; column < MAX_TALENT_COLUMNS; ++column)
                 if (uint32 talent = BotTalents::TalentAt(bot, tier, column))

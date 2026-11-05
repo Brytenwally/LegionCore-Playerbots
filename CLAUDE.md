@@ -300,12 +300,19 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   - `PlayerbotMgr::RequestCreate` (any thread, mutex) -> `ProcessCreates` on the world thread:
     create, then log in **3 s later** (`SaveToDB` is asynchronous; the login query must find the
     rows), with the request kept in `Bot::init`; once in the world it is posted to the bot's thread:
-    `PlayerbotAI::InitializeNewBot` -> `BotFactory::InitializeNewBot`: `GiveLevel(creator's level)`
-    (never lower than the class's start level), `ForceChangeTalentGroup(spec)`, `FillTalents`,
+    `PlayerbotAI::InitializeNewBot` -> `BotFactory::InitializeNewBot`: `GiveLevel(creator's level)`, `ForceChangeTalentGroup(spec)`, `FillTalents`,
     `AutoGear` with `destroyReplaced` (starting gear), full health/mana, `SaveToDB`, `TeleportTo` the
     creator's position; the bot whispers a summary.
-  - `FillTalents`: every empty unlocked row gets a talent; **no talent builds yet, so a random
-    column** (`BotTalents::TalentAt`); rows with a talent are never touched. Runs at creation, on
+  - Owner's rule (2026-11-05): **hero classes are created only from their starting level**:
+    `.playerbots create` refuses a Death Knight below level 55 and a Demon Hunter below 98.
+  - `FillTalents`: every empty unlocked row gets the spec's build talent (`TalentBuilds`, from the
+    owner's `Talents.txt`: Legion leveling guides, one talent per row; names matched against the
+    spells of the row's talents for the class/spec, so columns do not matter). Monk rows in the file
+    only describe changes, so those picks come from that text; Holy Paladin takes the file's dungeon
+    picks where given and Beacon of the Lightbringer (Beacon of Virtue would replace the rotation's
+    Beacon of Light). **No build yet for Warriors and Demon Hunters** (not in the file): random
+    column. A build name missing from its row on this core is logged once (`Talent build of spec N:
+    no talent 'X' in row R`) and the row gets a random talent; rows with a talent are never touched. Runs at creation, on
     `talents <spec>`, and every 10 s out of combat for every bot (owner's decision: alts included,
     empty rows only).
 - `BotGear` (`src/BotGear.*`): Ask Mr. Robot scales from the owner's Pawn files (`AskMrRobot.lua`,
@@ -331,7 +338,7 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   1-4>` (switch spec with `ForceChangeTalentGroup`, fill rows), `autogear` (not in combat; an order,
   so allowed on alts). GM command `.playerbots create <class> [spec]` (in game: level, faction and
   position come from the GM; class names incl. `dk`, `dh`, `demon hunter`).
-- Not yet: talent builds per spec (owner offered to send them), gems/enchants, bonus IDs (item
+- Not yet: Warrior and Demon Hunter talent builds, gems/enchants, bonus IDs (item
   levels are the templates' base levels), artifact weapons (AshamaneCore's table, step 5),
   `Game.Patch` item level tiers.
 

@@ -277,6 +277,14 @@ public:
             return true;
         }
 
+        // owner's rule: a hero class is created only from its starting level (Death Knight 55, Demon Hunter 98)
+        uint8 const heroLevel = cls == CLASS_DEATH_KNIGHT ? 55 : cls == CLASS_DEMON_HUNTER ? 98 : 0;
+        if (player->getLevel() < heroLevel)
+        {
+            handler->PSendSysMessage("You need level %u to create a %s bot.", uint32(heroLevel), BotFactory::ClassName(cls));
+            return true;
+        }
+
         BotFactory::CreateRequest request;
         request.cls = cls;
         if (!specName.empty())
