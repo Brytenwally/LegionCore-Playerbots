@@ -53,6 +53,24 @@ namespace BotGear
 
     // value of the item for the bot's current spec at itemLevel (0 for an unknown spec)
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel);
+
+    // item level of a template with Legion bonus lists (a loot roll's item)
+    uint32 ItemLevelWithBonuses(ItemTemplate const* proto, std::vector<uint32> const& bonusListIds);
+
+    // Loot rolls and equipping from the bags: is the item for this bot (armor / weapon it can use, meant for
+    // its spec, its class's armor type, a hand layout its spec uses), into which slot it would go and by how
+    // much it beats what is worn there (the weaker ring / trinket / dual-wield hand; a two-hander against
+    // both hands). gain = (new - old) / old, 1 when the slot is empty.
+    struct Comparison
+    {
+        bool usable = false;
+        uint8 slot = 0;
+        float newScore = 0.0f;
+        float oldScore = 0.0f;
+        float gain = 0.0f;
+        bool twoHanded = false;         // takes both hands: the off hand must be emptied first
+    };
+    Comparison CompareToWorn(Player* bot, ItemTemplate const* proto, uint32 itemLevel);
     // equips, slot by slot, a random one of the best candidates that beat what the bot wears; first fills
     // the empty bag slots with large bags
     Result AutoGear(Player* bot, Options const& options);

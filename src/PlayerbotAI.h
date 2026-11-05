@@ -16,12 +16,14 @@
 #include "BotCombat.h"
 #include "BotRotations.h"
 #include "BotFactory.h"
+#include "BotGear.h"
 #include "BotFormation.h"
 #include "LFG.h"
 #include <map>
 #include <string>
 #include <vector>
 
+class Item;
 class Player;
 class Quest;
 class WorldObject;
@@ -126,6 +128,13 @@ private:
     void UpdateFollow(Player* bot);
     // dungeon finder: answers its group's role check by its spec and accepts proposals, as a client would
     void UpdateLfg(Player* bot);
+    // group loot: need on a Playerbots.Loot.NeedUpgradePct upgrade for its spec, greed otherwise (random bots
+    // pass when Playerbots.Loot.RandomBotsRoll = 0)
+    void UpdateLootRolls(Player* bot);
+    // an item that reached the bags and beats the worn piece by Playerbots.AutoEquip.UpgradePct is put on;
+    // in combat it waits for the end of the fight
+    void UpdateBagEquip(Player* bot);
+    bool EquipFromBag(Player* bot, Item* item, BotGear::Comparison const& comparison);
     bool FormationOrder(Player* bot, OrderSender const& sender, std::string const& args);
     void StopFollowing(Player* bot);
     void Say(Player* bot, ObjectGuid const& to, std::string const& text);
@@ -153,6 +162,9 @@ private:
     bool _dismissed = false;                                // waiting for the manager to give it a new AI
     uint32 _lfgTimer = 0;
     uint32 _answeredProposal = 0;
+    uint32 _lootTimer = 0;
+    uint64 _bagSignature = 0;                               // the bag contents last checked for upgrades
+    bool _equipPending = false;                             // bags changed during a fight
 
     enum class AssistMode : uint8
     {

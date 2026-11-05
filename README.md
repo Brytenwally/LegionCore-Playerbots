@@ -78,6 +78,11 @@ When you log out, the bots of your account (your alts) log out with you.
   <spec>` switches) and `autogear` (upgrades for the spec by stat weights, each a random one of
   the 5 best for its slot, within `Playerbots.AutoGear.*` limits; empty bag slots get large bags
   first, replaced pieces go to the bags).
+- **Loot**: in group loot bots roll need on gear that is at least a 5% upgrade for their spec
+  (`Playerbots.Loot.NeedUpgradePct`), greed on the rest; `Playerbots.Loot.RandomBotsRoll = 0`
+  leaves rolling to alt bots only (random bots pass). Any item that reaches a bot's bags and is at
+  least a 5% upgrade is put on at once, or when the fight ends (`Playerbots.AutoEquip.*`; alt bots
+  only with `Playerbots.AutoEquip.Alts = 1`). The bot whispers you what it equipped.
 - **Dismissing a random bot** (it leaves or is removed from your group, or you log out for a
   minute): it leaves the group, loses everything it carries except its bags, goes back to level 1
   (death knights 55, demon hunters 98) and returns to GM Island for the next player. `.playerbots

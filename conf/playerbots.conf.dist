@@ -241,3 +241,34 @@ Playerbots.Formation.Default = "role"
 Playerbots.LFG.Fill = 1
 Playerbots.LFG.FillDelay = 30000
 Playerbots.LFG.JoinInterval = 2000
+
+###################################################################################################
+# LOOT ROLLS AND EQUIPPING FROM THE BAGS
+###################################################################################################
+
+#
+#    Playerbots.Loot.RandomBotsRoll
+#    Playerbots.Loot.NeedUpgradePct
+#        In group loot a bot rolls need on armor / weapons for its spec (its armor type, usable,
+#        a hand layout its spec uses) that beat the piece it wears in that slot by NeedUpgradePct
+#        % by its stat weights (the weaker ring / trinket / dual-wield hand; a two-hander against
+#        both hands); greed on everything else. RandomBotsRoll = 0: only alt bots roll, random
+#        bots pass on everything.
+#        Default: 1, 5
+
+Playerbots.Loot.RandomBotsRoll = 1
+Playerbots.Loot.NeedUpgradePct = 5
+
+#
+#    Playerbots.AutoEquip.Enable
+#    Playerbots.AutoEquip.Alts
+#    Playerbots.AutoEquip.UpgradePct
+#        An item that reaches a bot's bags by any means (loot, roll, quest, mail, vendor...) is put
+#        on if it beats the worn piece by UpgradePct % by its stat weights (same comparison as the
+#        need roll); the old piece takes its bag slot. In combat it waits for the end of the fight.
+#        Alt bots only with Alts = 1 (nothing changes an alt unless the player orders it).
+#        Default: 1, 0, 5
+
+Playerbots.AutoEquip.Enable = 1
+Playerbots.AutoEquip.Alts = 0
+Playerbots.AutoEquip.UpgradePct = 5

@@ -39,6 +39,11 @@ void PlayerbotMgr::LoadConfig()
     _engageRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Combat.EngageRange", 30.0f));
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
     _selfGMOnly = sConfigMgr->GetBoolDefault("Playerbots.Self.GMOnly", true);
+    _loot.randomBotsRoll = sConfigMgr->GetBoolDefault("Playerbots.Loot.RandomBotsRoll", true);
+    _loot.needUpgradePct = sConfigMgr->GetFloatDefault("Playerbots.Loot.NeedUpgradePct", 5.0f);
+    _loot.autoEquip = sConfigMgr->GetBoolDefault("Playerbots.AutoEquip.Enable", true);
+    _loot.autoEquipAlts = sConfigMgr->GetBoolDefault("Playerbots.AutoEquip.Alts", false);
+    _loot.equipUpgradePct = sConfigMgr->GetFloatDefault("Playerbots.AutoEquip.UpgradePct", 5.0f);
     {
         std::string formation = sConfigMgr->GetStringDefault("Playerbots.Formation.Default", "role");
         std::transform(formation.begin(), formation.end(), formation.begin(), [](unsigned char c) { return char(std::tolower(c)); });

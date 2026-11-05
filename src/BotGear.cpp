@@ -595,4 +595,130 @@ namespace BotGear
         }
         return destroyed;
     }
+
+    uint32 ItemLevelWithBonuses(ItemTemplate const* proto, std::vector<uint32> const& bonusListIds)
+    {
+        BonusData bonus;
+        bonus.Initialize(proto);
+        for (uint32 id : bonusListIds)
+            if (DB2Manager::ItemBonusList const* list = sDB2Manager.GetItemBonusList(id))
+                for (ItemBonusEntry const* entry : *list)
+                    bonus.AddBonus(entry->Type, entry->Value);
+        return uint32(std::max<int32>(1, int32(ItemLevelOf(proto)) + bonus.ItemLevelBonus));
+    }
+
+    Comparison CompareToWorn(Player* bot, ItemTemplate const* proto, uint32 itemLevel)
+    {
+        Comparison result;
+        uint32 const spec = bot->GetSpecializationId();
+        if (!proto || WeightTable.find(spec) == WeightTable.end())
+            return result;
+        uint32 const cls = proto->GetClass();
+        if (cls != ITEM_CLASS_ARMOR && cls != ITEM_CLASS_WEAPON)
+            return result;
+
+        InventoryType const type = proto->GetInventoryType();
+        if (IsBodyArmor(type) && proto->GetSubClass() != WornArmorType(bot))
+            return result;
+        if (!proto->IsUsableBySpecialization(spec, bot->getLevel(), false) || bot->CanUseItem(proto) != EQUIP_ERR_OK)
+            return result;
+
+        auto worn = [bot](uint8 slot) -> Item* { return bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot); };
+        auto wornScore = [bot, &worn](uint8 slot) -> float
+        {
+            Item* item = worn(slot);
+            return item ? ItemScore(bot, item->GetTemplate(), item->GetItemLevel(bot->getLevel())) : 0.0f;
+        };
+        auto isTwoHander = [](ItemTemplate const* p)
+        {
+            InventoryType const t = p->GetInventoryType();
+            return t == INVTYPE_2HWEAPON || t == INVTYPE_RANGED || t == INVTYPE_RANGEDRIGHT;
+        };
+        Item* mainHand = worn(EQUIPMENT_SLOT_MAINHAND);
+        bool const titanGrip = HandsFor(spec) == Hands::TitanGrip && bot->CanTitanGrip();
+        bool const mainTwoHanded = mainHand && isTwoHander(mainHand->GetTemplate()) && !titanGrip;
+        Hands const hands = HandsFor(spec);
+        bool const dual = hands == Hands::DualWield || hands == Hands::DualOrTwoHand || hands == Hands::TitanGrip;
+
+        // the weaker of two slots (an empty one first)
+        auto weaker = [&](uint8 a, uint8 b) -> uint8 { return wornScore(b) < wornScore(a) ? b : a; };
+
+        uint8 slot = 0;
+        float old = 0.0f;
+        switch (type)
+        {
+            case INVTYPE_HEAD:      slot = EQUIPMENT_SLOT_HEAD; break;
+            case INVTYPE_NECK:      slot = EQUIPMENT_SLOT_NECK; break;
+            case INVTYPE_SHOULDERS: slot = EQUIPMENT_SLOT_SHOULDERS; break;
+            case INVTYPE_CHEST:
+            case INVTYPE_ROBE:      slot = EQUIPMENT_SLOT_CHEST; break;
+            case INVTYPE_WAIST:     slot = EQUIPMENT_SLOT_WAIST; break;
+            case INVTYPE_LEGS:      slot = EQUIPMENT_SLOT_LEGS; break;
+            case INVTYPE_FEET:      slot = EQUIPMENT_SLOT_FEET; break;
+            case INVTYPE_WRISTS:    slot = EQUIPMENT_SLOT_WRISTS; break;
+            case INVTYPE_HANDS:     slot = EQUIPMENT_SLOT_HANDS; break;
+            case INVTYPE_CLOAK:     slot = EQUIPMENT_SLOT_BACK; break;
+            case INVTYPE_FINGER:    slot = weaker(EQUIPMENT_SLOT_FINGER1, EQUIPMENT_SLOT_FINGER2); break;
+            case INVTYPE_TRINKET:   slot = weaker(EQUIPMENT_SLOT_TRINKET1, EQUIPMENT_SLOT_TRINKET2); break;
+            case INVTYPE_2HWEAPON:
+                if (hands == Hands::OneHandShield || hands == Hands::DualWield || hands == Hands::Ranged)
+                    return result;
+                if (titanGrip)
+                    slot = weaker(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
+                else
+                {
+                    slot = EQUIPMENT_SLOT_MAINHAND;
+                    old = wornScore(EQUIPMENT_SLOT_MAINHAND) + wornScore(EQUIPMENT_SLOT_OFFHAND);
+                    result.twoHanded = true;
+                }
+                break;
+            case INVTYPE_RANGED:
+            case INVTYPE_RANGEDRIGHT:
+                if (hands != Hands::Ranged || cls != ITEM_CLASS_WEAPON || proto->GetSubClass() == ITEM_SUBCLASS_WEAPON_WAND)
+                    return result;
+                slot = EQUIPMENT_SLOT_MAINHAND;
+                old = wornScore(EQUIPMENT_SLOT_MAINHAND) + wornScore(EQUIPMENT_SLOT_OFFHAND);
+                result.twoHanded = true;
+                break;
+            case INVTYPE_WEAPON:
+            case INVTYPE_WEAPONMAINHAND:
+                if (hands == Hands::TwoHand || hands == Hands::Ranged)
+                    return result;
+                // a one-hander instead of a two-hander must beat the whole two-hander alone
+                if (dual && type == INVTYPE_WEAPON && !mainTwoHanded)
+                    slot = weaker(EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
+                else
+                    slot = EQUIPMENT_SLOT_MAINHAND;
+                break;
+            case INVTYPE_WEAPONOFFHAND:
+                if (!dual || mainTwoHanded)
+                    return result;
+                slot = EQUIPMENT_SLOT_OFFHAND;
+                break;
+            case INVTYPE_SHIELD:
+                if ((hands != Hands::OneHandShield && hands != Hands::CasterShield) || mainTwoHanded)
+                    return result;
+                slot = EQUIPMENT_SLOT_OFFHAND;
+                break;
+            case INVTYPE_HOLDABLE:
+                if (hands != Hands::Caster || mainTwoHanded)
+                    return result;
+                slot = EQUIPMENT_SLOT_OFFHAND;
+                break;
+            default:
+                return result;
+        }
+
+        if (!result.twoHanded)
+            old = wornScore(slot);
+        result.newScore = ItemScore(bot, proto, itemLevel);
+        if (result.newScore <= 0.0f)
+            return result;
+
+        result.usable = true;
+        result.slot = slot;
+        result.oldScore = old;
+        result.gain = old > 0.0f ? (result.newScore - old) / old : 1.0f;
+        return result;
+    }
 }

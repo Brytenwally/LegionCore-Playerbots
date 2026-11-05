@@ -61,6 +61,17 @@ public:
     SurvivalOptions const& GetSurvivalOptions() const { return _survival; }
     BotFormation::Shape GetDefaultFormation() const { return _defaultFormation; }
 
+    // loot rolls and equipping from the bags (owner's rules, 2026-11-05)
+    struct LootOptions
+    {
+        bool randomBotsRoll = true;     // false: only alt bots roll; random bots pass
+        float needUpgradePct = 5.0f;    // need when the item beats the worn piece by this much
+        bool autoEquip = true;
+        bool autoEquipAlts = false;     // alt rule: nothing changes an alt unless ordered
+        float equipUpgradePct = 5.0f;
+    };
+    LootOptions const& GetLootOptions() const { return _loot; }
+
     // ".playerbots self" (player's thread): turns the AI on or off for his own character; reply = what to tell him
     bool ToggleSelfBot(Player* player, std::string& reply);
     bool IsSelfGMOnly() const { return _selfGMOnly; }
@@ -201,6 +212,7 @@ private:
     float _engageRange = 30.0f;
     uint32 _engageDelay = 1200;
     SurvivalOptions _survival;
+    LootOptions _loot;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

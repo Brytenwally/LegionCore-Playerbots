@@ -5,7 +5,10 @@
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
 #include "DB2Stores.h"
+#include "Bag.h"
 #include "Group.h"
+#include "Item.h"
+#include "LootMgr.h"
 #include "World.h"
 #include "CellImpl.h"
 #include "Creature.h"
@@ -49,6 +52,7 @@ namespace
     uint32 const CombatCheckInterval = 250;                 // ms between combat checks (one cast at most each)
     uint32 const TalentCheckInterval = 10000;               // ms between checks for empty talent rows
     uint32 const LfgCheckInterval = 1000;                   // ms between dungeon finder checks (role check, proposal)
+    uint32 const LootCheckInterval = 1000;                  // ms between loot roll / bag upgrade checks
     uint32 const ChaosInterval = 3000;                      // ms between new chaos formation offsets
     int32 const GroupLeftLogoutDelay = 3000;                // owner's rule: logout this long after leaving his group
     float const RangedDistance = 25.0f;                     // ranged roles chase to this distance
@@ -127,6 +131,14 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     {
         _lfgTimer = 0;
         UpdateLfg(bot);
+    }
+
+    _lootTimer += diff;
+    if (_lootTimer >= LootCheckInterval)
+    {
+        _lootTimer = 0;
+        UpdateLootRolls(bot);
+        UpdateBagEquip(bot);
     }
 
     _combatTimer += diff;
@@ -1992,4 +2004,127 @@ void PlayerbotAI::Dismiss(Player* bot, char const* why)
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' dismissed (%s): reset and back to GM Island.", bot->GetName(), why);
     BotFactory::ResetBot(bot, true);
     sPlayerbotMgr->RequestRelease(bot->GetGUID());
+}
+
+// ---- Loot rolls and equipping from the bags (2026-11-05) -------------------------------------------------
+
+void PlayerbotAI::UpdateLootRolls(Player* bot)
+{
+    Group* group = bot->GetGroup();
+    if (!group)
+        return;
+
+    PlayerbotMgr::LootOptions const& options = sPlayerbotMgr->GetLootOptions();
+    for (Group::PendingRoll const& roll : group->GetPendingRolls(bot->GetGUID()))
+    {
+        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(roll.itemId);
+        uint8 choice = ROLL_PASS;
+        char const* why = "random bots do not roll (Playerbots.Loot.RandomBotsRoll)";
+        if (!_randomBot || options.randomBotsRoll)
+        {
+            why = "not an upgrade for my spec";
+            if (proto && (roll.rollVoteMask & ROLL_FLAG_TYPE_NEED))
+            {
+                BotGear::Comparison const comparison = BotGear::CompareToWorn(bot, proto,
+                    BotGear::ItemLevelWithBonuses(proto, roll.bonusListIds));
+                if (comparison.usable && comparison.gain * 100.0f >= options.needUpgradePct)
+                    choice = ROLL_NEED;
+                else if (comparison.usable)
+                    why = "too small an upgrade";
+            }
+            if (choice != ROLL_NEED && (roll.rollVoteMask & ROLL_FLAG_TYPE_GREED))
+                choice = ROLL_GREED;
+        }
+
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' rolls %s on %s%s%s.", bot->GetName(),
+            choice == ROLL_NEED ? "need" : choice == ROLL_GREED ? "greed" : "pass",
+            proto && proto->GetName() ? proto->GetName()->Str[LOCALE_enUS] : "?",
+            choice == ROLL_NEED ? "" : ": ", choice == ROLL_NEED ? "" : why);
+        // as WorldSession::HandleLootRoll, on the voter's own thread
+        group->CountRollVote(bot, roll.aoeSlot, choice);
+    }
+}
+
+void PlayerbotAI::UpdateBagEquip(Player* bot)
+{
+    PlayerbotMgr::LootOptions const& options = sPlayerbotMgr->GetLootOptions();
+    if (!options.autoEquip || (!_randomBot && !options.autoEquipAlts) || !bot->IsAlive())
+        return;
+
+    // the bag contents (items and where they are): a change means something was gained (loot, quest, mail,
+    // vendor, roll, crafting...)
+    std::vector<Item*> items;
+    uint64 signature = 0;
+    auto add = [&items, &signature](Item* item, uint32 pos)
+    {
+        items.push_back(item);
+        signature = signature * 1000003ULL + item->GetGUID().GetCounter() * 131ULL + pos;
+    };
+    for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+        if (Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+            add(item, slot);
+    for (uint8 bag = INVENTORY_SLOT_BAG_START; bag < INVENTORY_SLOT_BAG_END; ++bag)
+        if (Bag* container = bot->GetBagByPos(bag))
+            for (uint32 slot = 0; slot < container->GetBagSize(); ++slot)
+                if (Item* item = container->GetItemByPos(uint8(slot)))
+                    add(item, (bag << 8) | slot);
+
+    if (signature == _bagSignature && !_equipPending)
+        return;
+    _bagSignature = signature;
+
+    if (bot->isInCombat())
+    {
+        _equipPending = true;                               // after the fight
+        return;
+    }
+    _equipPending = false;
+
+    // the best upgrade first, then look again (a ring may now go to the other finger), a few per check
+    for (uint32 round = 0; round < 6; ++round)
+    {
+        Item* bestItem = nullptr;
+        BotGear::Comparison best;
+        for (Item* item : items)
+        {
+            if (!item || item->IsInTrade())
+                continue;
+            BotGear::Comparison const comparison = BotGear::CompareToWorn(bot, item->GetTemplate(), item->GetItemLevel(bot->getLevel()));
+            if (comparison.usable && comparison.gain * 100.0f >= options.equipUpgradePct && comparison.gain > best.gain)
+            {
+                best = comparison;
+                bestItem = item;
+            }
+        }
+        if (!bestItem || !EquipFromBag(bot, bestItem, best))
+            break;
+        items.erase(std::remove(items.begin(), items.end(), bestItem), items.end());
+    }
+}
+
+bool PlayerbotAI::EquipFromBag(Player* bot, Item* item, BotGear::Comparison const& comparison)
+{
+    // a two-hander needs a free off hand: the off-hand piece goes to the bags first
+    if (comparison.twoHanded)
+        if (Item* off = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND))
+        {
+            ItemPosCountVec dest;
+            if (bot->CanStoreItem(NULL_BAG, NULL_SLOT, dest, off, false) != EQUIP_ERR_OK)
+                return false;
+            bot->RemoveItem(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND, true);
+            bot->StoreItem(dest, off, true);
+        }
+
+    std::string const name = item->GetTemplate()->GetName() ? item->GetTemplate()->GetName()->Str[LOCALE_enUS] : "?";
+    // as CMSG_SWAP_INV_ITEM: the worn piece takes the new one's bag slot
+    bot->SwapItem(item->GetPos(), uint16((INVENTORY_SLOT_BAG_0 << 8) | comparison.slot));
+    if (bot->GetItemByPos(INVENTORY_SLOT_BAG_0, comparison.slot) != item)
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' could not equip %s.", bot->GetName(), name.c_str());
+        return false;
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' equips %s (+%.0f%%).", bot->GetName(), name.c_str(), comparison.gain * 100.0f);
+    if (!_master.IsEmpty())
+        Say(bot, _master, "Equipped " + name + " (+" + std::to_string(int32(comparison.gain * 100.0f + 0.5f)) + "% for my spec).");
+    return true;
 }

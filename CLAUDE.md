@@ -523,6 +523,29 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     it (matched with others; they keep that master), refilling a running dungeon.
 - Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
 
+## Loot rolls and equipping from the bags (2026-11-05, untested)
+
+Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.
+- Core commit "Add pending loot rolls accessor for modules" (LegionCore-Reforged): `Group::GetPendingRolls(member)`
+  = rolls of live loot (`GetValidRollLoots`) whose vote for him is `NOT_EMITED_YET` (aoe slot, item id, bonus
+  lists, vote mask). The bot votes with `Group::CountRollVote(bot, aoeSlot, choice)` on its own thread, as
+  `WorldSession::HandleLootRoll` does (the roll list is private, there was no other way to see it).
+- `BotGear::CompareToWorn(bot, proto, itemLevel)`: usable (armor/weapon, `CanUseItem`, `IsUsableBySpecialization`,
+  class armor type for body armor, a hand layout of the spec's `HandsFor`), slot (weaker ring / trinket / dual
+  hand; two-hander and ranged vs both hands; a one-hander replacing a two-hander must beat it alone; off-hand
+  pieces refused while a two-hander is held), gain = (new - old) / old by `ItemScore`, 1 for an empty slot.
+  A roll's item level = base + `BonusData::ItemLevelBonus` of its bonus lists (`ItemLevelWithBonuses`); bag
+  items use `Item::GetItemLevel`.
+- `PlayerbotAI::UpdateLootRolls` (every 1 s, not self-bots): need when allowed and gain >=
+  `Playerbots.Loot.NeedUpgradePct` (5), else greed when allowed, else pass; random bots pass on everything when
+  `Playerbots.Loot.RandomBotsRoll = 0`. Every vote is logged with its reason.
+- `PlayerbotAI::UpdateBagEquip` (every 1 s): a signature of the bag contents (item guids and positions) detects
+  any gain (loot, roll, quest, mail, vendor; the core calls only `OnLootItem` / `OnCreateItem`, no hook for
+  quest rewards, so no hooks are used); in combat it is kept pending (`_equipPending`) until the fight ends.
+  Best gain >= `Playerbots.AutoEquip.UpgradePct` (5) first, up to 6 per check, re-evaluated after each;
+  `Player::SwapItem` (as `CMSG_SWAP_INV_ITEM`: the worn piece takes the bag slot), the off hand moved to the bags
+  first for a two-hander. Whispers the master. Alts only with `Playerbots.AutoEquip.Alts = 1` (alt rule).
+
 ## Status
 
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the
