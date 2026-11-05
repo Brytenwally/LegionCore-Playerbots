@@ -7,7 +7,11 @@
 #include "AccountMgr.h"
 #include "Chat.h"
 #include "Config.h"
+#include "DB2Stores.h"
 #include "GlobalFunctional.h"
+#include "Group.h"
+#include "LFGMgr.h"
+#include "Timer.h"
 #include "Log.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
@@ -34,6 +38,19 @@ void PlayerbotMgr::LoadConfig()
     _combatLog = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.Combat.Log", 1), 2);
     _engageRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Combat.EngageRange", 30.0f));
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
+    _selfGMOnly = sConfigMgr->GetBoolDefault("Playerbots.Self.GMOnly", true);
+    {
+        std::string formation = sConfigMgr->GetStringDefault("Playerbots.Formation.Default", "role");
+        std::transform(formation.begin(), formation.end(), formation.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        if (!BotFormation::ShapeFromName(formation, _defaultFormation))
+        {
+            TC_LOG_ERROR("server.loading", "[mod-playerbots] Playerbots.Formation.Default: unknown formation '%s', using role.", formation.c_str());
+            _defaultFormation = BotFormation::Shape::Role;
+        }
+    }
+    _lfgFillEnabled = sConfigMgr->GetBoolDefault("Playerbots.LFG.Fill", true);
+    _lfgFillDelay = sConfigMgr->GetIntDefault("Playerbots.LFG.FillDelay", 30000);
+    _lfgJoinInterval = std::max(500, sConfigMgr->GetIntDefault("Playerbots.LFG.JoinInterval", 2000));
     _survival.defensives = sConfigMgr->GetBoolDefault("Playerbots.Combat.Defensives", true);
     _survival.potionHealthPct = sConfigMgr->GetFloatDefault("Playerbots.Combat.PotionHealthPct", 30.0f);
     _survival.potionManaPct = sConfigMgr->GetFloatDefault("Playerbots.Combat.PotionManaPct", 20.0f);
@@ -489,6 +506,7 @@ void PlayerbotMgr::Update(uint32 diff)
     if (_enabled)
         UpdatePool(diff);
     ProcessCreates(diff);
+    UpdateLfgFill(diff);
 
     // Owner's rules when a player logs out or disconnects (2026-11-05; the first one from SkyFire):
     // - the bots of his account (alt bots) log out at once, so an alt is never left running while he
@@ -609,7 +627,10 @@ std::shared_ptr<PlayerbotAI> PlayerbotMgr::GetAI(ObjectGuid const& bot) const
 {
     std::lock_guard<std::mutex> lock(_aiLock);
     auto itr = _ais.find(bot);
-    return itr != _ais.end() ? itr->second : nullptr;
+    if (itr != _ais.end())
+        return itr->second;
+    itr = _selfAis.find(bot);
+    return itr != _selfAis.end() ? itr->second : nullptr;
 }
 
 std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> PlayerbotMgr::GetBotsOwnedBy(ObjectGuid const& player, uint32 accountId) const
@@ -619,13 +640,386 @@ std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> PlayerbotMgr::G
     for (auto const& pair : _ais)
         if (pair.first != player && pair.second->IsMaster(player, accountId))
             owned.emplace_back(pair.first, pair.second);
+    // his own character when it is a self-bot: party chat orders reach it too
+    auto self = _selfAis.find(player);
+    if (self != _selfAis.end())
+        owned.emplace_back(self->first, self->second);
     return owned;
 }
 
 void PlayerbotMgr::OnPlayerLogout(uint32 accountId, ObjectGuid const& player)
 {
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        if (_selfAis.erase(player))
+            --_selfCount;
+    }
+    {
+        std::lock_guard<std::mutex> lock(_lfgLock);
+        _lfgCheckTimers.erase(player);
+    }
     std::lock_guard<std::mutex> lock(_logoutLock);
     _loggedOutPlayers.emplace_back(accountId, player);
+}
+
+// ---- Self-bot ------------------------------------------------------------------------------------------
+
+bool PlayerbotMgr::ToggleSelfBot(Player* player, std::string& reply)
+{
+    ObjectGuid const guid = player->GetGUID();
+    std::shared_ptr<PlayerbotAI> ai;
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        auto itr = _selfAis.find(guid);
+        if (itr != _selfAis.end())
+        {
+            ai = itr->second;
+            _selfAis.erase(itr);
+            --_selfCount;
+        }
+    }
+    if (ai)
+    {
+        ai->Detach(player);
+        reply = "Self-bot off: you control your character again.";
+        TC_LOG_INFO("server.loading", "[mod-playerbots] %s: self-bot off.", player->GetName());
+        return true;
+    }
+
+    WorldSession* session = player->GetSession();
+    if (!session || session->IsBot())
+    {
+        reply = "Only a player's own character can be a self-bot.";
+        return false;
+    }
+
+    ai = std::make_shared<PlayerbotAI>(guid, session->GetAccountId(), false);
+    ai->SetSelfBot();
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        _selfAis[guid] = ai;
+        ++_selfCount;
+    }
+    reply = "Self-bot on: your character fights your target and whatever attacks the group with its spec's rotation, "
+        "follows the group's leader and takes the bot orders (whisper yourself or use party chat). "
+        "'.playerbots self' again to stop.";
+    TC_LOG_INFO("server.loading", "[mod-playerbots] %s: self-bot on.", player->GetName());
+    return true;
+}
+
+void PlayerbotMgr::OnClientUpdate(Player* player, uint32 diff)
+{
+    ObjectGuid const guid = player->GetGUID();
+    if (_selfCount)
+    {
+        std::shared_ptr<PlayerbotAI> ai;
+        {
+            std::lock_guard<std::mutex> lock(_aiLock);
+            auto itr = _selfAis.find(guid);
+            if (itr != _selfAis.end())
+                ai = itr->second;
+        }
+        if (ai)
+            ai->Update(player, diff);
+    }
+
+    if (!_enabled || !_lfgFillEnabled)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(_lfgLock);
+        uint32& timer = _lfgCheckTimers[guid];
+        timer += diff;
+        if (timer < 2000)
+            return;
+        timer = 0;
+    }
+
+    if (!sLFGMgr->HasQueue(guid))
+        return;
+
+    // a group's queue is its leader's; a dungeon finder group (already in its dungeon) is not filled
+    Group* group = player->GetGroup();
+    if (group && (group->isLFGGroup() || group->GetLeaderGUID() != guid))
+        return;
+
+    std::vector<ObjectGuid> members;
+    if (group)
+    {
+        for (Group::MemberSlot const& slot : group->GetMemberSlots())
+            members.push_back(slot.Guid);
+    }
+    else
+        members.push_back(guid);
+
+    std::vector<QueueReport> reports;
+    for (uint32 queueId : sLFGMgr->GetQueueIds(guid))
+    {
+        lfg::LfgState const state = sLFGMgr->GetState(guid, queueId);
+        if (state != lfg::LFG_STATE_QUEUED && state != lfg::LFG_STATE_ROLECHECK && state != lfg::LFG_STATE_PROPOSAL)
+            continue;
+
+        QueueReport report;
+        report.queuer = guid;
+        report.queueId = queueId;
+        report.level = player->getLevel();
+        report.team = player->GetTeam();
+        report.queued = state == lfg::LFG_STATE_QUEUED;
+        report.dungeons = sLFGMgr->GetSelectedDungeons(guid, queueId);
+        // each member counts once, for the scarcest role he offers
+        for (ObjectGuid const& member : members)
+        {
+            uint8 const roles = sLFGMgr->GetRoles(member, queueId);
+            if (roles & lfg::PLAYER_ROLE_TANK)
+                ++report.tanks;
+            else if (roles & lfg::PLAYER_ROLE_HEALER)
+                ++report.healers;
+            else
+                ++report.dps;
+        }
+        if (!report.dungeons.empty())
+            reports.push_back(report);
+    }
+
+    if (reports.empty())
+        return;
+    std::lock_guard<std::mutex> lock(_lfgLock);
+    _queueReports.insert(_queueReports.end(), reports.begin(), reports.end());
+}
+
+// ---- Dungeon finder fill -------------------------------------------------------------------------------
+
+void PlayerbotMgr::RequestRelease(ObjectGuid const& bot)
+{
+    std::lock_guard<std::mutex> lock(_lfgLock);
+    _releaseRequests.push_back(bot);
+}
+
+void PlayerbotMgr::ReleaseBot(ObjectGuid const& guid)
+{
+    auto itr = _bots.find(guid);
+    if (itr == _bots.end() || itr->second.removing)
+        return;
+    Bot& bot = itr->second;
+    bot.notifyGuid.Clear();
+    bot.ownerGoneTimer = -1;
+    std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(ObjectGuid::Empty, bot.session->GetAccountId(), true);
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        _ais[guid] = ai;
+    }
+    ObjectAccessor::PostToPlayer(guid, [](Player* p) -> void
+    {
+        if (!p->GetGroup())
+            p->TeleportTo(1, 16222.1f, 16252.1f, 12.5872f, 1.35f);  // GM Island
+    });
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is free again (back to GM Island).", bot.name.c_str());
+}
+
+void PlayerbotMgr::UpdateLfgFill(uint32 diff)
+{
+    _lfgTimer += diff;
+    if (_lfgTimer < 1000)
+        return;
+    _lfgTimer = 0;
+
+    std::vector<QueueReport> reports;
+    std::vector<ObjectGuid> releases;
+    {
+        std::lock_guard<std::mutex> lock(_lfgLock);
+        reports.swap(_queueReports);
+        releases.swap(_releaseRequests);
+    }
+    for (ObjectGuid const& guid : releases)
+        ReleaseBot(guid);
+
+    uint32 const now = getMSTime();
+    for (QueueReport const& report : reports)
+    {
+        LfgFill& fill = _lfgFills[std::make_pair(report.queuer, report.queueId)];
+        if (!fill.firstSeen)
+        {
+            fill.firstSeen = now;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: %s queued (%s); bots fill missing roles in %u s.",
+                report.queuer.ToString().c_str(), lfg::ConcatenateDungeons(report.dungeons).c_str(), _lfgFillDelay / 1000);
+        }
+        fill.report = report;
+        fill.lastSeen = now;
+    }
+
+    // a fill bot leaves the queue and is freed, unless it is grouped already (a dungeon was found)
+    auto abandon = [](ObjectGuid const& guid)
+    {
+        std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(guid);
+        if (!ai)
+            return;
+        ObjectAccessor::PostToPlayer(guid, [ai, guid](Player* bot) -> void
+        {
+            if (ai->AbandonLfg(bot))
+                sPlayerbotMgr->RequestRelease(guid);
+        });
+    };
+
+    for (auto itr = _lfgFills.begin(); itr != _lfgFills.end();)
+    {
+        LfgFill& fill = itr->second;
+        uint32 const queueId = itr->first.second;
+
+        // no report for a while: he left the queue, logged out, or the group was made (his state is no longer
+        // queued / role check / proposal)
+        if (getMSTimeDiff(fill.lastSeen, now) > 5000)
+        {
+            for (LfgFill::FillBot const& bot : fill.bots)
+                abandon(bot.guid);
+            itr = _lfgFills.erase(itr);
+            continue;
+        }
+
+        // bots no longer in that queue (matched with other players, or the join failed) leave the fill
+        for (auto bot = fill.bots.begin(); bot != fill.bots.end();)
+        {
+            lfg::LfgState const state = sLFGMgr->GetState(bot->guid, queueId);
+            bool const inQueue = state == lfg::LFG_STATE_QUEUED || state == lfg::LFG_STATE_ROLECHECK || state == lfg::LFG_STATE_PROPOSAL;
+            if (inQueue || getMSTimeDiff(bot->started, now) < 10000)
+            {
+                ++bot;
+                continue;
+            }
+            if (state != lfg::LFG_STATE_DUNGEON)
+                abandon(bot->guid);
+            bot = fill.bots.erase(bot);
+        }
+
+        if (!fill.report.queued || getMSTimeDiff(fill.firstSeen, now) < _lfgFillDelay || int32(fill.nextJoin - now) > 0)
+        {
+            ++itr;
+            continue;
+        }
+
+        // 5-man dungeons (random or specific); the role counts come from the dungeon's entry
+        lfg::LFGDungeonData const* dungeon = sLFGMgr->GetLFGDungeon(*fill.report.dungeons.begin() & 0xFFFFF);
+        if (!dungeon || !dungeon->dbc || dungeon->dbc->Substruct != LFG_QUEUE_DUNGEON)
+        {
+            ++itr;
+            continue;
+        }
+        int32 tanks = dungeon->dbc->CountTank;
+        int32 healers = dungeon->dbc->CountHealer;
+        int32 dps = dungeon->dbc->CountDamage;
+        if (!tanks && !healers && !dps)
+        {
+            tanks = 1;
+            healers = 1;
+            dps = 3;
+        }
+        tanks -= fill.report.tanks;
+        healers -= fill.report.healers;
+        dps -= fill.report.dps;
+        for (LfgFill::FillBot const& bot : fill.bots)
+        {
+            if (bot.role & lfg::PLAYER_ROLE_TANK)
+                --tanks;
+            else if (bot.role & lfg::PLAYER_ROLE_HEALER)
+                --healers;
+            else
+                --dps;
+        }
+
+        // one bot per JoinInterval, the scarce roles first
+        for (uint8 role : { uint8(lfg::PLAYER_ROLE_TANK), uint8(lfg::PLAYER_ROLE_HEALER), uint8(lfg::PLAYER_ROLE_DAMAGE) })
+        {
+            int32 const need = role == lfg::PLAYER_ROLE_TANK ? tanks : role == lfg::PLAYER_ROLE_HEALER ? healers : dps;
+            if (need <= 0)
+                continue;
+            if (StartLfgBot(fill, role))
+            {
+                fill.nextJoin = now + _lfgJoinInterval;
+                break;
+            }
+        }
+        ++itr;
+    }
+}
+
+bool PlayerbotMgr::StartLfgBot(LfgFill& fill, uint8 role)
+{
+    uint8 const specRole = role == lfg::PLAYER_ROLE_TANK ? ROLES_TANK : role == lfg::PLAYER_ROLE_HEALER ? ROLES_HEALER : ROLES_DPS;
+    auto specsFor = [specRole](uint8 cls)
+    {
+        std::vector<uint32> specs;
+        for (uint32 spec : BotFactory::SpecsOfClass(cls))
+            if (ChrSpecializationEntry const* entry = sChrSpecializationStore.LookupEntry(spec))
+                if (entry->Role == specRole)
+                    specs.push_back(spec);
+        return specs;
+    };
+
+    std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
+    auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
+
+    // an idle logged-in pool bot of his faction, at most his level, whose class has a spec of that role;
+    // the highest level first
+    ObjectGuid bestGuid;
+    Bot* best = nullptr;
+    CharacterInfo const* bestInfo = nullptr;
+    for (auto& pair : _bots)
+    {
+        Bot& bot = pair.second;
+        if (bot.removing || !bot.inWorld || !bot.notifyGuid.IsEmpty() || bot.init || !onBotAccount(bot.session->GetAccountId()))
+            continue;
+        CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);
+        if (!info || Player::TeamForRace(info->Race) != fill.report.team || info->Level > fill.report.level ||
+            (bestInfo && info->Level <= bestInfo->Level) || specsFor(info->Class).empty())
+            continue;
+        best = &bot;
+        bestGuid = pair.first;
+        bestInfo = info;
+    }
+
+    if (!best)
+    {
+        if (!(fill.warned & role))
+        {
+            fill.warned |= role;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: no idle pool bot can fill a %s for %s.",
+                role == lfg::PLAYER_ROLE_TANK ? "tank" : role == lfg::PLAYER_ROLE_HEALER ? "healer" : "dps",
+                fill.report.queuer.ToString().c_str());
+        }
+        return false;
+    }
+
+    std::vector<uint32> const specs = specsFor(bestInfo->Class);
+    BotFactory::CreateRequest request;
+    request.cls = bestInfo->Class;
+    request.specId = specs[urand(0, specs.size() - 1)];
+    request.level = fill.report.level;
+    request.team = fill.report.team;
+    request.creator = fill.report.queuer;
+    request.teleport = false;                               // the dungeon finder takes it to the dungeon
+
+    best->notifyGuid = fill.report.queuer;
+    best->toGMIsland = false;
+    best->ownerGoneTimer = -1;
+    std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(fill.report.queuer, best->session->GetAccountId(), true);
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        _ais[bestGuid] = ai;
+    }
+    lfg::LfgDungeonSet const dungeons = fill.report.dungeons;
+    ObjectAccessor::PostToPlayer(bestGuid, [ai, request, dungeons, role](Player* p) -> void
+    {
+        ai->JoinLfgFor(p, request, dungeons, role);
+    });
+
+    LfgFill::FillBot fillBot;
+    fillBot.guid = bestGuid;
+    fillBot.role = role;
+    fillBot.started = getMSTime();
+    fill.bots.push_back(fillBot);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: bot '%s' fills a %s for %s.", best->name.c_str(),
+        role == lfg::PLAYER_ROLE_TANK ? "tank" : role == lfg::PLAYER_ROLE_HEALER ? "healer" : "dps",
+        fill.report.queuer.ToString().c_str());
+    return true;
 }
 
 void PlayerbotMgr::Shutdown()

@@ -20,6 +20,11 @@
 #include "BotFactory.h"
 #include "BotGear.h"
 #include "BotConsumables.h"
+#include "BotFormation.h"
+#include "Chat.h"
+#include "GameTime.h"
+#include "LFGMgr.h"
+#include "LFGPackets.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
@@ -41,10 +46,10 @@
 namespace
 {
     uint32 const FollowCheckInterval = 500;                 // ms between follow checks
-    float const FollowDistance = 2.0f;
-    float const FollowAngle = float(M_PI);                  // behind the leader
     uint32 const CombatCheckInterval = 250;                 // ms between combat checks (one cast at most each)
     uint32 const TalentCheckInterval = 10000;               // ms between checks for empty talent rows
+    uint32 const LfgCheckInterval = 1000;                   // ms between dungeon finder checks (role check, proposal)
+    uint32 const ChaosInterval = 3000;                      // ms between new chaos formation offsets
     int32 const GroupLeftLogoutDelay = 3000;                // owner's rule: logout this long after leaving his group
     float const RangedDistance = 25.0f;                     // ranged roles chase to this distance
     float const RangedStopDistance = 30.0f;                 // ... and stop chasing within this (and in sight)
@@ -61,6 +66,11 @@ namespace
     }
 }
 
+PlayerbotAI::PlayerbotAI(ObjectGuid const& master, uint32 accountId, bool randomBot)
+    : _master(master), _accountId(accountId), _formation(sPlayerbotMgr->GetDefaultFormation()), _randomBot(randomBot)
+{
+}
+
 bool PlayerbotAI::IsMaster(ObjectGuid const& guid, uint32 accountId) const
 {
     return (!_master.IsEmpty() && guid == _master) || (accountId && accountId == _accountId);
@@ -70,6 +80,24 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
 {
     if (!bot->IsInWorld() || bot->IsBeingTeleported())
         return;
+
+    if (_selfBot)
+    {
+        // the player's own character: only the fight and the follow (no invites, logout rules or talents)
+        _combatTimer += diff;
+        if (_combatTimer >= CombatCheckInterval)
+        {
+            _combatTimer = 0;
+            UpdateCombat(bot);
+        }
+        _followTimer += diff;
+        if (_followTimer >= FollowCheckInterval)
+        {
+            _followTimer = 0;
+            UpdateFollow(bot);
+        }
+        return;
+    }
 
     if (!_inviteCreator.IsEmpty())
     {
@@ -92,6 +120,13 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         _talentTimer = 0;
         if (bot->IsAlive() && !bot->isInCombat())
             BotFactory::FillTalents(bot);
+    }
+
+    _lfgTimer += diff;
+    if (_lfgTimer >= LfgCheckInterval)
+    {
+        _lfgTimer = 0;
+        UpdateLfg(bot);
     }
 
     _combatTimer += diff;
@@ -188,24 +223,65 @@ void PlayerbotAI::UpdateFollow(Player* bot)
         return;
     }
 
-    // the master when he is in the group, the group's leader otherwise; only on the bot's own map
-    ObjectGuid targetGuid = group->GetLeaderGUID();
-    if (!_master.IsEmpty() && group->IsMember(_master))
-        targetGuid = _master;
-    if (targetGuid == bot->GetGUID())
+    // the master when he is in the group, the group's leader otherwise; only on the bot's own map (a self-bot's
+    // master is himself: he follows the leader)
+    ObjectGuid leaderGuid = group->GetLeaderGUID();
+    if (!_selfBot && !_master.IsEmpty() && group->IsMember(_master))
+        leaderGuid = _master;
+    if (leaderGuid == bot->GetGUID())
         return;
 
-    Player* target = ObjectAccessor::GetPlayer(*bot, targetGuid);
-    if (!target || !target->IsInWorld() || target->IsBeingTeleported())
+    Player* leader = ObjectAccessor::GetPlayer(*bot, leaderGuid);
+    if (!leader || !leader->IsInWorld() || leader->IsBeingTeleported())
         return;
+
+    // the formation slot (SkyFire / mod-playerbots formations); the chaos offset changes every few seconds
+    _jitterTimer += FollowCheckInterval;
+    if (_jitterTimer >= ChaosInterval)
+    {
+        _jitterTimer = 0;
+        _jitterForward = frand(-1.5f, 1.5f);
+        _jitterLeft = frand(-1.5f, 1.5f);
+    }
+    BotFormation::Slot const slot = BotFormation::SlotFor(bot, leader, BotCombat::GroupMembersOnMap(bot), _formation,
+        _jitterForward, _jitterLeft);
+    Player* target = slot.anchor == leaderGuid ? leader : ObjectAccessor::GetPlayer(*bot, slot.anchor);
+    if (!target || !target->IsInWorld() || target->IsBeingTeleported())
+        target = leader;
 
     MotionMaster* motion = bot->GetMotionMaster();
-    if (_followGuid == targetGuid && motion->GetCurrentMovementGeneratorType() == FOLLOW_MOTION_TYPE)
+    if (_followGuid == target->GetGUID() && motion->GetCurrentMovementGeneratorType() == FOLLOW_MOTION_TYPE &&
+        std::fabs(_followDistance - slot.distance) < 0.3f && std::fabs(_followAngle - slot.angle) < 0.15f)
         return;
 
     motion->Clear();
-    motion->MoveFollow(target, FollowDistance, FollowAngle);
-    _followGuid = targetGuid;
+    motion->MoveFollow(target, slot.distance, slot.angle);
+    _followGuid = target->GetGUID();
+    _followDistance = slot.distance;
+    _followAngle = slot.angle;
+}
+
+// "formation [name]": shows or sets the follow formation (SkyFire's role slots, mod-playerbots' shapes)
+bool PlayerbotAI::FormationOrder(Player* bot, OrderSender const& sender, std::string const& args)
+{
+    if (args.empty())
+    {
+        Say(bot, sender.guid, std::string("Formation: ") + BotFormation::ShapeName(_formation) + ". Options: " + BotFormation::ShapeList() + ".");
+        return true;
+    }
+
+    BotFormation::Shape shape;
+    if (!BotFormation::ShapeFromName(args, shape))
+    {
+        Say(bot, sender.guid, "Unknown formation '" + args + "'. Options: " + BotFormation::ShapeList() + ".");
+        return true;
+    }
+
+    _formation = shape;
+    _followGuid.Clear();                                    // take the new slot at the next check
+    _followTimer = FollowCheckInterval;
+    Say(bot, sender.guid, std::string("Formation set to ") + BotFormation::ShapeName(shape) + ".");
+    return true;
 }
 
 void PlayerbotAI::StopFollowing(Player* bot)
@@ -224,7 +300,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], player tank, bot tank, talents [spec], autogear, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], player tank, bot tank, talents [spec], autogear, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -300,6 +376,11 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
             "I tank: I taunt whatever attacks the group." : "Bot tanks tank again.");
         return true;
     }
+
+    if (order == "formation")
+        return FormationOrder(bot, sender, "");
+    if (order.rfind("formation ", 0) == 0)
+        return FormationOrder(bot, sender, order.substr(10));
 
     if (order == "passive")
         return AssistOrder(bot, sender, "passive");
@@ -497,6 +578,12 @@ bool PlayerbotAI::ListQuests(Player* bot, ObjectGuid const& to, std::string cons
 
 void PlayerbotAI::Say(Player* bot, ObjectGuid const& to, std::string const& text)
 {
+    // a self-bot talks to its own player as system messages
+    if (_selfBot && to == bot->GetGUID())
+    {
+        ChatHandler(bot->GetSession()).SendSysMessage(text.c_str());
+        return;
+    }
     // Player::Whisper by guid reaches the receiver wherever he stands
     bot->Whisper(text, LANG_UNIVERSAL, to);
 }
@@ -1076,9 +1163,12 @@ void PlayerbotAI::UpdateCombat(Player* bot)
         enemy = (_engaged && current && current->IsAlive()) ? current : nullptr;
     }
 
-    UpdateRest(bot, members, enemy);
-    if (_resting)
-        return;
+    if (!_selfBot)                                          // the player sits down himself
+    {
+        UpdateRest(bot, members, enemy);
+        if (_resting)
+            return;
+    }
 
     if (enemy)
         Engage(bot, enemy, role);
@@ -1163,6 +1253,18 @@ Unit* PlayerbotAI::SelectTarget(Player* bot, std::vector<Player*> const& members
             return target;
         }
         _orderedTarget.Clear();
+    }
+
+    // a self-bot fights the player's own target, as an ordered one: hostile, or already in a fight
+    if (_selfBot)
+    {
+        Unit* target = ObjectAccessor::GetUnit(*bot, bot->GetSelection());
+        if (target && target != bot && target->IsInWorld() && target->IsAlive() && bot->IsValidAttackTarget(target) &&
+            (bot->IsHostileTo(target) || target->isInCombat()))
+        {
+            ordered = true;
+            return target;
+        }
     }
 
     auto usable = [bot, range](Unit* unit)
@@ -1612,7 +1714,8 @@ void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
 
     // Owner's rule (2026-11-05): a random bot never stays in a party without its master (a party of bots
     // left behind by a leader who left): it leaves, so it is free for another player.
-    if (_randomBot && group && !_leaveQueued)
+    // A dungeon finder group is the exception: it may join a bot to other players than its master.
+    if (_randomBot && group && !_leaveQueued && !group->isLFGGroup())
     {
         _leaveQueued = true;
         WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
@@ -1638,6 +1741,13 @@ void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
 
     _groupLogoutTimer = -1;
     _wasWithOwner = false;
+    // out of a dungeon finder group first, so the group does not keep an offline member in the dungeon
+    if (group && group->isLFGGroup())
+    {
+        WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
+        *packet << int8(0);
+        bot->GetSession()->QueuePacket(packet);
+    }
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out: it left its owner's group.", bot->GetName());
     bot->GetSession()->LogoutBot();
 }
@@ -1746,3 +1856,109 @@ void PlayerbotAI::UpdateRest(Player* bot, std::vector<Player*> const& members, U
         TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' rests (health %.0f%%, mana %.0f%%).", bot->GetName(), health, mana);
 }
 
+// ---- Self-bot and dungeon finder -------------------------------------------------------------------------
+
+void PlayerbotAI::Detach(Player* bot)
+{
+    if (_engaged)
+        StopCombat(bot, "self-bot off");
+    if (!_followGuid.IsEmpty())
+        StopFollowing(bot);
+    _healMoveGuid.Clear();
+}
+
+namespace
+{
+    uint8 LfgRoleOf(Player* bot)
+    {
+        switch (BotCombat::RoleOf(bot))
+        {
+            case BotCombat::BotRole::Tank:   return lfg::PLAYER_ROLE_TANK;
+            case BotCombat::BotRole::Healer: return lfg::PLAYER_ROLE_HEALER;
+            default:                         return lfg::PLAYER_ROLE_DAMAGE;
+        }
+    }
+
+    char const* LfgRoleName(uint8 role)
+    {
+        if (role & lfg::PLAYER_ROLE_TANK)
+            return "tank";
+        if (role & lfg::PLAYER_ROLE_HEALER)
+            return "healer";
+        return "dps";
+    }
+}
+
+// As a client: the group's role check gets the bot's spec role (the leader's queue, his order to the party),
+// and a dungeon proposal is accepted. Both through the dungeon finder's own entry points, on the bot's thread
+// like the packet handlers (HandleLfgCompleteRoleCheck, HandleLfgProposalResponse).
+void PlayerbotAI::UpdateLfg(Player* bot)
+{
+    ObjectGuid const guid = bot->GetGUID();
+    if (Group* group = bot->GetGroup())
+    {
+        uint8 chosen = 0;
+        if (sLFGMgr->GetRoleCheckRoles(group->GetGUID(), guid, chosen) &&
+            !(chosen & (lfg::PLAYER_ROLE_TANK | lfg::PLAYER_ROLE_HEALER | lfg::PLAYER_ROLE_DAMAGE)))
+        {
+            uint8 const role = LfgRoleOf(bot);
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' answers the dungeon finder role check: %s.", bot->GetName(), LfgRoleName(role));
+            sLFGMgr->UpdateRoleCheck(group->GetGUID(), guid, role);
+        }
+    }
+
+    uint32 const proposal = sLFGMgr->GetPendingProposal(guid);
+    if (!proposal)
+    {
+        _answeredProposal = 0;
+        return;
+    }
+    if (proposal == _answeredProposal)
+        return;
+
+    _answeredProposal = proposal;
+    WorldPackets::LFG::ProposalResponse response;
+    response.ProposalID = proposal;
+    response.Accepted = true;
+    response.Ticket.RequesterGuid = guid;
+    response.Ticket.Time = int32(GameTime::GetGameTime());
+    for (uint32 queueId : sLFGMgr->GetQueueIds(guid))
+        if (Optional<WorldPackets::LFG::RideTicket> ticket = sLFGMgr->GetTicket(guid, queueId))
+        {
+            response.Ticket = *ticket;
+            break;
+        }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' accepts dungeon finder proposal %u.", bot->GetName(), proposal);
+    sLFGMgr->UpdateProposal(response, guid);
+}
+
+void PlayerbotAI::JoinLfgFor(Player* bot, BotFactory::CreateRequest const& request, lfg::LfgDungeonSet dungeons, uint8 role)
+{
+    std::string const summary = BotFactory::InitializeNewBot(bot, request);
+    if (bot->GetGroup())
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is in a group: no dungeon finder fill.", bot->GetName());
+        return;
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' queues for the dungeon finder as %s (%s): %s",
+        bot->GetName(), LfgRoleName(role), lfg::ConcatenateDungeons(dungeons).c_str(), summary.c_str());
+    sLFGMgr->JoinLfg(bot, role, dungeons);
+}
+
+bool PlayerbotAI::AbandonLfg(Player* bot)
+{
+    if (bot->GetGroup())
+        return false;
+    // a proposal or a dungeon already under way: the group is being made, the bot stays
+    std::vector<uint32> const queues = sLFGMgr->GetQueueIds(bot->GetGUID());
+    for (uint32 queueId : queues)
+    {
+        lfg::LfgState const state = sLFGMgr->GetState(bot->GetGUID(), queueId);
+        if (state == lfg::LFG_STATE_PROPOSAL || state == lfg::LFG_STATE_DUNGEON)
+            return false;
+    }
+    if (!queues.empty())
+        sLFGMgr->LeaveLfg(bot->GetGUID());
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves the dungeon finder: its queuer left the queue.", bot->GetName());
+    return true;
+}

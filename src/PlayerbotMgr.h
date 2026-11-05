@@ -14,12 +14,16 @@
 #include "ObjectGuid.h"
 #include "BotFactory.h"
 #include "BotGear.h"
+#include "BotFormation.h"
+#include "LFG.h"
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+class Player;
 class PlayerbotAI;
 class WorldSession;
 
@@ -55,6 +59,17 @@ public:
         float restManaPct = 50.0f;
     };
     SurvivalOptions const& GetSurvivalOptions() const { return _survival; }
+    BotFormation::Shape GetDefaultFormation() const { return _defaultFormation; }
+
+    // ".playerbots self" (player's thread): turns the AI on or off for his own character; reply = what to tell him
+    bool ToggleSelfBot(Player* player, std::string& reply);
+    bool IsSelfGMOnly() const { return _selfGMOnly; }
+    // a client's character, every update on his own thread: runs his self-bot AI and reports his dungeon
+    // finder queues to the fill
+    void OnClientUpdate(Player* player, uint32 diff);
+    // Any thread: a dungeon finder fill bot whose queuer left the queue is free again (no master, back to
+    // GM Island)
+    void RequestRelease(ObjectGuid const& bot);
 
     // Starts logging the character in as a bot. notifyGuid (may be empty) gets "Bot 'X' logged in."
     // when the character is in the world, or the reason it failed.
@@ -93,6 +108,50 @@ public:
 
 private:
     PlayerbotMgr() = default;
+
+    // Dungeon finder fill (owner's request, 2026-11-05): a client queued for a dungeon (alone or as his group's
+    // leader) is reported from his thread; after Playerbots.LFG.FillDelay the world thread sets up idle pool
+    // bots of his faction one by one (his level, a spec of a missing role) and queues them for the same
+    // dungeons, so other players may queue first.
+    struct QueueReport
+    {
+        ObjectGuid queuer;
+        uint32 queueId = 0;
+        uint8 level = 0;
+        uint32 team = 0;
+        bool queued = false;                                // LFG_STATE_QUEUED (fill only then)
+        lfg::LfgDungeonSet dungeons;
+        uint8 tanks = 0;                                    // roles his group already brings
+        uint8 healers = 0;
+        uint8 dps = 0;
+    };
+    struct LfgFill
+    {
+        QueueReport report;
+        uint32 firstSeen = 0;                               // getMSTime
+        uint32 lastSeen = 0;
+        uint32 nextJoin = 0;
+        struct FillBot
+        {
+            ObjectGuid guid;
+            uint8 role = 0;                                 // lfg::PLAYER_ROLE_*
+            uint32 started = 0;                             // getMSTime of its setup
+        };
+        std::vector<FillBot> bots;
+        uint8 warned = 0;                                   // roles already logged as "no idle pool bot"
+    };
+    void UpdateLfgFill(uint32 diff);
+    bool StartLfgBot(LfgFill& fill, uint8 role);
+    void ReleaseBot(ObjectGuid const& guid);
+    std::mutex _lfgLock;
+    std::map<ObjectGuid, uint32> _lfgCheckTimers;           // client -> ms since his last queue report (same lock)
+    std::vector<QueueReport> _queueReports;                 // same lock
+    std::vector<ObjectGuid> _releaseRequests;               // same lock
+    std::map<std::pair<ObjectGuid, uint32>, LfgFill> _lfgFills;  // world thread only
+    uint32 _lfgTimer = 0;
+    bool _lfgFillEnabled = true;
+    uint32 _lfgFillDelay = 30000;
+    uint32 _lfgJoinInterval = 2000;
 
     struct Bot
     {
@@ -144,6 +203,10 @@ private:
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads
+    std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _selfAis;  // self-bots by player guid, same lock
+    std::atomic<uint32> _selfCount{ 0 };                    // skips the lookup for every client update while 0
+    bool _selfGMOnly = true;
+    BotFormation::Shape _defaultFormation = BotFormation::Shape::Role;
     BotGear::Options _gearOptions;
     BotFactory::CreateConfig _createConfig;
     std::mutex _createLock;

@@ -31,7 +31,7 @@ public:
     void OnStartup() override
     {
         BotRotations::Initialize();
-        TC_LOG_INFO("server.loading", "[mod-playerbots] Module loaded (%s). GM commands: .playerbots add/remove/list.",
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Module loaded (%s). GM commands: .playerbots add/create/remove/removeall/list/self.",
             sPlayerbotMgr->IsEnabled() ? "enabled" : "disabled");
     }
 
@@ -55,8 +55,14 @@ public:
     void OnUpdate(Player* player, uint32 diff) override
     {
         WorldSession* session = player->GetSession();
-        if (!session || !session->IsBot())
+        if (!session)
             return;
+        if (!session->IsBot())
+        {
+            // a client: his self-bot AI, his dungeon finder queues for the fill
+            sPlayerbotMgr->OnClientUpdate(player, diff);
+            return;
+        }
 
         if (std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(player->GetGUID()))
             ai->Update(player, diff);
@@ -178,6 +184,8 @@ private:
             player->GetName(), what, questId, uint32(bots.size()));
         for (auto const& owned : bots)
         {
+            if (owned.first == owner)                       // his own character as a self-bot
+                continue;
             std::shared_ptr<PlayerbotAI> ai = owned.second;
             ObjectAccessor::PostToPlayer(owned.first, [ai, action, owner, groupGuid, questId](Player* bot) -> void
             {
@@ -200,12 +208,14 @@ public:
             { "create",    SEC_GAMEMASTER, false, &HandleCreateCommand,    "" },
             { "remove",    SEC_GAMEMASTER, true,  &HandleRemoveCommand,    "" },
             { "removeall", SEC_GAMEMASTER, true,  &HandleRemoveAllCommand, "" },
-            { "list",      SEC_GAMEMASTER, true,  &HandleListCommand,      "" }
+            { "list",      SEC_GAMEMASTER, true,  &HandleListCommand,      "" },
+            // open to players when Playerbots.Self.GMOnly = 0 (checked in the handler)
+            { "self",      SEC_PLAYER,     false, &HandleSelfCommand,      "" }
         };
 
         static std::vector<ChatCommand> commandTable =
         {
-            { "playerbots", SEC_GAMEMASTER, true, nullptr, "", playerbotsCommandTable }
+            { "playerbots", SEC_PLAYER, true, nullptr, "", playerbotsCommandTable }
         };
         return commandTable;
     }
@@ -309,6 +319,34 @@ public:
     }
 
     // .playerbots remove <name>: logs the bot out (saved)
+    // .playerbots self: the player's own character becomes a bot (rotation, orders, moves to its target), again = off
+    static bool HandleSelfCommand(ChatHandler* handler, char const* /*args*/)
+    {
+        WorldSession* session = handler->GetSession();
+        Player* player = session ? session->GetPlayer() : nullptr;
+        if (!player)
+            return false;
+        if (!sPlayerbotMgr->IsEnabled())
+        {
+            handler->SendSysMessage("Playerbots are disabled (Playerbots.Enable = 0).");
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+        if (sPlayerbotMgr->IsSelfGMOnly() && session->GetSecurity() < SEC_GAMEMASTER)
+        {
+            handler->SendSysMessage("Only game masters may use .playerbots self (Playerbots.Self.GMOnly).");
+            handler->SetSentErrorMessage(true);
+            return false;
+        }
+
+        std::string reply;
+        bool const done = sPlayerbotMgr->ToggleSelfBot(player, reply);
+        handler->SendSysMessage(reply.c_str());
+        if (!done)
+            handler->SetSentErrorMessage(true);
+        return done;
+    }
+
     static bool HandleRemoveCommand(ChatHandler* handler, char const* args)
     {
         if (!args || !*args)

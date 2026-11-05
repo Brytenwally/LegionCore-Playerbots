@@ -16,6 +16,8 @@
 #include "BotCombat.h"
 #include "BotRotations.h"
 #include "BotFactory.h"
+#include "BotFormation.h"
+#include "LFG.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -41,7 +43,21 @@ class PlayerbotAI
 public:
     // master: the player who added the bot (may be empty, e.g. added from the console).
     // randomBot: a bot of a bot account (not anyone's alt)
-    PlayerbotAI(ObjectGuid const& master, uint32 accountId, bool randomBot) : _master(master), _accountId(accountId), _randomBot(randomBot) { }
+    PlayerbotAI(ObjectGuid const& master, uint32 accountId, bool randomBot);
+
+    // ".playerbots self": the AI runs a client's own character (master = himself). No invites, no logout rules,
+    // no automatic talents or rest; his own target is fought as an ordered one. Set before the AI is shared.
+    void SetSelfBot() { _selfBot = true; }
+    bool IsSelfBot() const { return _selfBot; }
+    // the self-bot is switched off: give the movement and the fight back to the player (his thread)
+    void Detach(Player* bot);
+
+    // Dungeon finder fill (PlayerbotMgr::UpdateLfgFill): a pool bot set up to the queuer's level in a spec of the
+    // missing role, then queued for the same dungeons (random or specific). On the bot's thread.
+    void JoinLfgFor(Player* bot, BotFactory::CreateRequest const& request, lfg::LfgDungeonSet dungeons, uint8 role);
+    // the fill was not needed any more (the queuer left the queue): leave the queue if still in it, alone
+    // (not grouped yet); true when the bot is free again (no group), so the manager may release it
+    bool AbandonLfg(Player* bot);
 
     void Update(Player* bot, uint32 diff);
     // a whisper to the bot, from anywhere; only its owner is obeyed
@@ -104,6 +120,9 @@ private:
     void TalentsOrder(Player* bot, OrderSender const& sender, std::string const& args);
     bool AssistOrder(Player* bot, OrderSender const& sender, std::string const& mode);
     void UpdateFollow(Player* bot);
+    // dungeon finder: answers its group's role check by its spec and accepts proposals, as a client would
+    void UpdateLfg(Player* bot);
+    bool FormationOrder(Player* bot, OrderSender const& sender, std::string const& args);
     void StopFollowing(Player* bot);
     void Say(Player* bot, ObjectGuid const& to, std::string const& text);
     // the reward the bot takes: the best usable item among the quest's choices and its class/spec
@@ -120,6 +139,15 @@ private:
     void const* _answeredInvite = nullptr;
     ObjectGuid _followGuid;                                 // who the current follow movement targets
     uint32 _followTimer = 0;
+    BotFormation::Shape _formation = BotFormation::Shape::Role;
+    float _followDistance = 0.0f;                           // the slot the current follow movement keeps
+    float _followAngle = 0.0f;
+    float _jitterForward = 0.0f;                            // chaos formation offset
+    float _jitterLeft = 0.0f;
+    uint32 _jitterTimer = 0;
+    bool _selfBot = false;
+    uint32 _lfgTimer = 0;
+    uint32 _answeredProposal = 0;
 
     enum class AssistMode : uint8
     {

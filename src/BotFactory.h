@@ -34,6 +34,7 @@ namespace BotFactory
         WorldLocation location;         // where the creator stood
         ObjectGuid creator;
         uint32 creatorAccount = 0;      // for his party invite to the bot
+        bool teleport = true;           // to location once set up (not for a dungeon finder fill)
     };
 
     // a bot character in the characters database

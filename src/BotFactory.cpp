@@ -542,7 +542,8 @@ namespace BotFactory
                 bot->SetPower(Powers(i), bot->GetMaxPower(Powers(i)));
 
         bot->SaveToDB();
-        bot->TeleportTo(request.location);
+        if (request.teleport)
+            bot->TeleportTo(request.location);
 
         char buffer[256];
         snprintf(buffer, sizeof(buffer), "Level %u %s %s, %u talent(s), %u item(s) equipped.", uint32(bot->getLevel()),

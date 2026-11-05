@@ -6,9 +6,11 @@ port of the AzerothCore playerbots.
 
 ## Status
 
-Bots log in and out, join your group, follow you and take whispered `follow` / `stay` orders.
-Quests are shared with them. No combat yet. Needs
-LegionCore-Reforged with its bot session hooks (`WorldSession::CreateBotSession`).
+Bots log in and out, join your group, follow you in formation, take orders, share your quests,
+fight with per-spec rotations (tanks, healers, defensives, potions, eating and drinking), fill the
+dungeon finder for you, and can be created on demand. Needs LegionCore-Reforged with its bot session
+hooks (`WorldSession::CreateBotSession`) and its dungeon finder accessors (`LFGMgr::GetQueueIds`,
+`GetRoleCheckRoles`, `GetPendingProposal`).
 
 ## GM commands
 
@@ -20,6 +22,8 @@ Set `Playerbots.Enable = 1` in `playerbots.conf` first.
 | `.playerbots remove <name>` | Logs the bot out (saved). |
 | `.playerbots removeall` | Logs every bot out. |
 | `.playerbots list` | Lists the bots and their state. |
+| `.playerbots create <class> [spec]` | A bot of your faction at your level, into your party (see below). |
+| `.playerbots self` | Your own character becomes a bot (again = off). GM only unless `Playerbots.Self.GMOnly = 0`. |
 
 When you log out, the bots of your account (your alts) log out with you.
 
@@ -53,6 +57,18 @@ When you log out, the bots of your account (your alts) log out with you.
   nothing, not even what attacks the bot, until `attack` or `assist full|defend`), `assist
   full|defend|passive`; `follow` does not end a fight. A dead
   bot is revived by `summon` in party chat (`Playerbots.Summon.Revive`).
+- **Formations**: `formation` shows the current one, `formation <name>` sets it: `role` (default:
+  tank ahead at your side, melee rear left, ranged rear right, healer behind), `near`, `line`,
+  `queue`, `circle`, `arrow`, `shield`, `chaos`, `far` (`Playerbots.Formation.Default`).
+- **Dungeon finder**: bots in your party answer the role check with their spec's role and accept
+  the dungeon. Queue alone or with a short party: 30 seconds later (`Playerbots.LFG.FillDelay`, so
+  other players can queue first) idle bots from GM Island take the missing roles one by one, set up
+  to your level in a spec of that role, and queue for the same dungeon (random or the ones you
+  picked). Leave the queue and they go back to GM Island.
+- **Self-bot**: `.playerbots self` lets the AI play your own character: it attacks your target (a
+  hostile one, or one already fighting) and whatever attacks the group, moving to it and casting
+  your spec's rotation, follows your group's leader and takes the same orders (whisper yourself or
+  use party chat). Say it again to take control back.
 
 - **Creating bots** (GM): `.playerbots create <class> [spec]` makes a new bot of your faction at
   your level, with a random (or the given) spec, talents and gear, brings it to you and into

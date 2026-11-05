@@ -315,7 +315,7 @@ server** (see Status, 2026-11-05).
     full, when a fight starts or when its leader is more than 20 yd away; follow and combat wait
     while `_resting`.
 - Not yet: tank threat bonus (owner: no), ground-effect dodge
-  (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
+  (AshamaneCore), pets, hunters' auto shot (talents and formations: see their sections).
 
 ## Created bots, talents and gear (2026-11-05, untested)
 
@@ -444,6 +444,64 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
 - Not yet: Warrior and Demon Hunter talent builds, gems/enchants, bonus IDs (item
   levels are the templates' base levels), artifact weapons (AshamaneCore's table, step 5),
   `Game.Patch` item level tiers.
+
+## Self-bot, formations, dungeon finder (2026-11-05, untested)
+
+Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations from SkyFire / mod-playerbots.
+- **Self-bot** (`.playerbots self`, toggles; `Playerbots.Self.GMOnly` 1 = GM only, checked in the handler:
+  the command is `SEC_PLAYER` and so is the `playerbots` parent, the other subcommands stay
+  `SEC_GAMEMASTER`; this core checks each subcommand's level on its own). `PlayerbotMgr::ToggleSelfBot` (the
+  player's thread) keeps a `PlayerbotAI` with master = the player and `SetSelfBot()` in `_selfAis` (by player
+  guid, `_aiLock`; `_selfCount` atomic skips the lookup in every client update while 0). Run from
+  `PlayerScript::OnUpdate` for clients (`OnClientUpdate`). `GetAI` finds it, so whispers to yourself and party
+  chat reach it (`GetBotsOwnedBy` includes it; quest mirroring skips it). In self mode `Update` only runs
+  combat and follow: no invite answers, owner/group logout rules, talent fill, rest or dungeon finder
+  answers. Its target = the player's selection when hostile or already in combat, as an ordered target
+  (no engage delay), then the usual assist rules; follow targets the group leader (its master is itself).
+  Replies to itself are system messages. Off: `Detach` (AttackStop, MoveIdle). Removed on logout.
+  SkyFire's self-bot only cast and left movement to the player; here the owner asked for movement too:
+  server movement (MoveChase / MoveFollow splines) on a client-controlled character, **untested** (keys
+  pressed by the player override it).
+- **Formations** (`src/combat/BotFormation.*`): a slot = distance + angle off the anchor's facing, given to
+  `MoveFollow`, so the core keeps it while the leader walks. Followers sorted by guid counter so every bot
+  computes the same places; roles from `BotRotations::RoleOf` (players too). Shapes: `role` (SkyFire's
+  `BotFormation`: tank fanned at 0.40 rad ahead-side 2 yd, healer behind 3.5 yd, ranged rear right 5 yd,
+  melee rear left 2.5 yd, +0.6 yd per same-role index), and mod-playerbots' `near`, `line` (leader in the
+  middle), `queue` (each follows the one ahead), `circle`, `arrow` (rows tank +2.5 / melee -2.5 / ranged -5.5
+  / healer -8.5), `shield` (tanks +3, others -3), `chaos` (near + random offset every 3 s), `far` (10 yd).
+  `UpdateFollow` re-issues the follow when the anchor or the slot changes (> 0.3 yd / 0.15 rad). Order
+  `formation [name]`; default `Playerbots.Formation.Default`.
+- **Dungeon finder**, core commit "Add LFG accessors for modules" (LegionCore-Reforged): `LFGMgr::
+  GetQueueIds(guid)` (PlayerDungeons), `GetRoleCheckRoles(gguid, guid, roles)` (a running role check,
+  state INITIALITING), `GetPendingProposal(guid)` (a proposal waiting for his answer). This core keeps LFG
+  state per **queue id** (`PlayersStore[guid][queueId]`, queue id = the dungeon's), and those stores are
+  private, hence the accessors. The bot answers through the same entry points as the packet handlers, on
+  its own thread (`HandleLfgCompleteRoleCheck` -> `UpdateRoleCheck(gguid, guid, roles)`,
+  `HandleLfgProposalResponse` -> `UpdateProposal(ProposalResponse)`; `ProposalResponse.Ticket.Time` is used
+  for wait times, so the bot sends its own ticket from `GetTicket`).
+  - `PlayerbotAI::UpdateLfg` (every 1 s, any non-self bot): role check -> its spec role (`ChrSpecialization`
+    role -> `PLAYER_ROLE_TANK/HEALER/DAMAGE`) when it has none yet; a pending proposal is accepted once.
+  - Fill (`PlayerbotMgr::UpdateLfgFill`, world thread every 1 s): a client's `OnClientUpdate` reports every
+    2 s, from his thread, each queue he is in (alone or as leader of a non-LFG group) in state queued /
+    role check / proposal: level, team, selected dungeons (the random dungeon id for a random queue), the
+    roles his group brings (`GetRoles(member, queueId)`, one per member, tank > healer > dps). After
+    `Playerbots.LFG.FillDelay` (30 s, owner's rule so other players queue first), while queued, for 5-man
+    dungeons only (`LFGDungeonsEntry::Substruct == LFG_QUEUE_DUNGEON`; counts `CountTank/Healer/Damage`,
+    1/1/3 if zero): one bot per `JoinInterval` for a missing role, tank first: an idle logged-in pool bot
+    (bot account, no master, not being set up) of his faction, at most his level, whose class has a spec of
+    that role, highest level first. It gets a new AI with the queuer as master, and on its thread
+    `JoinLfgFor`: `BotFactory::InitializeNewBot` with `CreateRequest::teleport = false` (his level, the
+    role's spec, talents, gear) then `sLFGMgr->JoinLfg(bot, role, dungeons)`.
+  - Fill bots no longer in that queue after 10 s (matched with other players, join refused) leave the fill;
+    when the queuer's reports stop for 5 s (left the queue, logged out, or the group was made) every fill bot
+    not grouped and not in a proposal / dungeon leaves the queue (`AbandonLfg`) and is released
+    (`ReleaseBot`: no master, new AI, back to GM Island).
+  - A random bot in a dungeon finder group (`isLFGGroup`) does not leave it for lack of its master; when its
+    master leaves that group it leaves too (queued `CMSG_LEAVE_GROUP`) and logs out 3 s later (the existing
+    rule), so the group keeps no offline bot.
+  - Not yet: raids / scenarios / LFR, boot votes, bots with no group after a dungeon whose queuer was not in
+    it (matched with others; they keep that master), refilling a running dungeon.
+- Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
 
 ## Status
 

@@ -180,3 +180,46 @@ Playerbots.Combat.PotionsOnAlts = 0
 Playerbots.Rest.Enable = 1
 Playerbots.Rest.HealthPct = 60
 Playerbots.Rest.ManaPct = 50
+
+###################################################################################################
+# SELF-BOT, FORMATIONS, DUNGEON FINDER
+###################################################################################################
+
+#
+#    Playerbots.Self.GMOnly
+#        ".playerbots self" makes the player's own character a bot: it fights his target (and
+#        whatever attacks the group) with its spec's rotation, follows the group's leader and takes
+#        the bot orders (whisper yourself or party chat). The same command again turns it off.
+#        Default: 1 - (Game masters only)
+#                 0 - (Every player)
+
+Playerbots.Self.GMOnly = 1
+
+#
+#    Playerbots.Formation.Default
+#        The follow formation bots start with; the "formation <name>" order changes it per bot.
+#        role   - tank ahead at the leader's side, melee rear left, ranged rear right, healer behind
+#        near   - everyone close behind      line   - abreast, the leader in the middle
+#        queue  - single file                circle - evenly around the leader
+#        arrow  - rows: tanks in front, then melee, ranged, healers
+#        shield - tanks in a line in front, the others in a line behind
+#        chaos  - near, with a random offset  far    - 10 yards behind
+#        Default: "role"
+
+Playerbots.Formation.Default = "role"
+
+#
+#    Playerbots.LFG.Fill
+#    Playerbots.LFG.FillDelay
+#    Playerbots.LFG.JoinInterval
+#        A player who queues for a 5-man dungeon in the dungeon finder (alone or as his group's
+#        leader): FillDelay ms later, idle pool bots of his faction (logged in on GM Island, at most
+#        his level) take the missing roles one every JoinInterval ms: each is set up to his level in a
+#        spec of that role and queues for the same dungeons (random or specific). The delay lets other
+#        players queue first. If he leaves the queue, bots not yet in a group leave it and go back to
+#        GM Island. Party bots always answer their leader's role check by their spec.
+#        Default: 1, 30000, 2000
+
+Playerbots.LFG.Fill = 1
+Playerbots.LFG.FillDelay = 30000
+Playerbots.LFG.JoinInterval = 2000
