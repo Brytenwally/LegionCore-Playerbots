@@ -152,7 +152,7 @@ Playerbots.AutoGear.IlvlCap.Factor100 = 7.0
 
 Playerbots.Pool.Accounts = 100
 Playerbots.Pool.Characters = 600
-Playerbots.Pool.LoginAtStartup = 50
+Playerbots.Pool.LoginAtStartup = 200
 
 ###################################################################################################
 # Survival (defensive cooldowns, potions, eating and drinking)
