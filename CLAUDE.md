@@ -259,6 +259,64 @@ server** (see Status, 2026-11-05).
 - Not yet: tank threat bonus (owner: no), defensives/potions (4.5), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
 
+## Created bots, talents and gear (2026-11-05, untested)
+
+Owner's request: `.playerbots create <class> [spec]` for easier testing; a created bot is at the
+creator's level, with a random spec (or the given one) and gear for it; the owner then uses the
+`talents` and `autogear` orders; quality and item level limits in `playerbots.conf`.
+- References: SkyFire-playerbots `CreateBotPopulation` / `CreateBotCharacter` (a core hook there;
+  not needed here) and AzerothCore's RandomPlayerbotFactory: bot accounts by prefix, random race
+  of the faction, generated names.
+- `BotFactory` (`src/BotFactory.*`):
+  - Accounts `<Playerbots.Create.AccountPrefix><n>` (default `PLAYERBOT1`...), created with
+    `AccountMgr::CreateAccount(name, password, false)` (synchronous; this core's game accounts need
+    no battle.net account), up to `CharactersPerAccount` (10) characters each
+    (`AccountMgr::GetCharactersCount`). Such bots are not alts.
+  - Character: as `WorldSession::HandleCharCreateOpcode` (`finalizeCharacterCreation`), on a bot
+    session of that account: `Player newChar(session)`, `Create(generator, &info)`, `setCinematic(1)`,
+    `AT_LOGIN_FIRST`, `SaveToDB(true)`, `realmcharacters` count, `OnPlayerCreate`,
+    `sWorld->AddCharacterInfo` / `UpdateCharacterAccount` (so `GetPlayerGUIDByName` finds it at once),
+    `CleanupsBeforeDelete`. Race: random among the creator's faction's races that can be the class
+    (`GetPlayerInfo(race, class)`; allied races left out, pandaren by faction); random gender;
+    generated name checked with `CheckPlayerName`, `CheckCharacterName` and the name cache.
+  - `PlayerbotMgr::RequestCreate` (any thread, mutex) -> `ProcessCreates` on the world thread:
+    create, then log in **3 s later** (`SaveToDB` is asynchronous; the login query must find the
+    rows), with the request kept in `Bot::init`; once in the world it is posted to the bot's thread:
+    `PlayerbotAI::InitializeNewBot` -> `BotFactory::InitializeNewBot`: `GiveLevel(creator's level)`
+    (never lower than the class's start level), `ForceChangeTalentGroup(spec)`, `FillTalents`,
+    `AutoGear` with `destroyReplaced` (starting gear), full health/mana, `SaveToDB`, `TeleportTo` the
+    creator's position; the bot whispers a summary.
+  - `FillTalents`: every empty unlocked row gets a talent; **no talent builds yet, so a random
+    column** (`BotTalents::TalentAt`); rows with a talent are never touched. Runs at creation, on
+    `talents <spec>`, and every 10 s out of combat for every bot (owner's decision: alts included,
+    empty rows only).
+- `BotGear` (`src/BotGear.*`): Ask Mr. Robot scales from the owner's Pawn files (`AskMrRobot.lua`,
+  Pawn 2.0218), per spec id (Pawn's class/spec order mapped to ChrSpecialization ids: Monk 1/2/3 =
+  268/270/269). Item value = Pawn's: sum of stat x weight with weapon min/max damage and armor;
+  hybrid primaries count as the spec's best primary (`PawnCombineStats`); a piece with primary stats
+  the spec weighs 0 is worth 0. Template stats at the base item level as `Item::GetItemStatValue`
+  (`StatPercentEditor x GetRandomPropertyPoints x 0.0001`, else `ItemStatValue`), armor
+  `GetArmor(ilvl)`, damage `GetDamage(ilvl)`.
+  Candidates from `sObjectMgr->GetItemTemplateStore()` (no SQL, as SkyFire): armor/weapons,
+  quality within `Playerbots.AutoGear.MinQuality..MaxQuality` (default 0..4; artifacts and
+  heirlooms never), `MaxItemLevel` (0 = none), required level <= the bot's, no scaling items,
+  `CanUseItem` (class, race, proficiency), **`IsUsableBySpecialization(spec, level)`** (Legion's
+  ItemSpec mask on the template: the core's own "for this spec" test), body armor of the class's
+  armor type (the lighter one while the skill is missing), names of test/NPC items skipped. Hands
+  per spec (`HandsFor`): two-hander, one-hander + shield, dual wield, caster (staff or one-hander
+  + held off-hand), caster with shield (Elemental/Resto Shaman), Titan's Grip (Fury, two
+  two-handers when `CanTitanGrip`), ranged (BM/MM). Slot by slot, only upgrades over the worn
+  piece's value (`Item::GetItemLevel`); rings/trinkets take the two best distinct items.
+  Replaced pieces go to the bags (skipped and counted when they do not fit) or are destroyed for a
+  new bot.
+- Orders (owner only): `talents` (spec, talent per row, the class's specs), `talents <spec name or
+  1-4>` (switch spec with `ForceChangeTalentGroup`, fill rows), `autogear` (not in combat; an order,
+  so allowed on alts). GM command `.playerbots create <class> [spec]` (in game: level, faction and
+  position come from the GM; class names incl. `dk`, `dh`, `demon hunter`).
+- Not yet: talent builds per spec (owner offered to send them), gems/enchants, bonus IDs (item
+  levels are the templates' base levels), artifact weapons (AshamaneCore's table, step 5),
+  `Game.Patch` item level tiers.
+
 ## Status
 
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the

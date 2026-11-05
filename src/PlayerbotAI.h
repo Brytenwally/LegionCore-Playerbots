@@ -15,6 +15,7 @@
 #include "Position.h"
 #include "BotCombat.h"
 #include "BotRotations.h"
+#include "BotFactory.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -53,6 +54,9 @@ public:
     void MirrorQuestAccept(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId);
     void MirrorQuestReward(Player* bot, ObjectGuid const& owner, ObjectGuid const& group, uint32 questId);
 
+    // a bot made by ".playerbots create", just logged in: level, spec, talents, gear, then to its creator
+    void InitializeNewBot(Player* bot, BotFactory::CreateRequest const& request);
+
     // the bot's owner: its master (who added it), or a player of the bot's own account (its alts' player).
     // Reads only constant members: safe from any thread.
     bool IsMaster(ObjectGuid const& guid, uint32 accountId) const;
@@ -88,6 +92,8 @@ private:
     bool TryTaunt(Player* bot, Unit* enemy);
     void LogSkip(Player* bot, size_t step, char const* spell, std::string const& reason);
     void AttackOrder(Player* bot, OrderSender const& sender);
+    void AutoGearOrder(Player* bot, OrderSender const& sender);
+    void TalentsOrder(Player* bot, OrderSender const& sender, std::string const& args);
     bool AssistOrder(Player* bot, OrderSender const& sender, std::string const& mode);
     void UpdateFollow(Player* bot);
     void StopFollowing(Player* bot);
@@ -120,6 +126,7 @@ private:
     bool _playerTank = false;                               // "player tank": the owner holds aggro, tank bots do not taunt
     ObjectGuid _healMoveGuid;                               // a healer walking to an out-of-reach heal target
     uint32 _combatTimer = 0;
+    uint32 _talentTimer = 0;
     BotCombat::SpellThrottle _throttle;
     BotCombat::EngageTimer _engageTimer;
     std::map<size_t, std::string> _lastSkip;                // rotation step -> last logged skip reason (log level 2)

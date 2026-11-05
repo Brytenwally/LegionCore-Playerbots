@@ -197,6 +197,7 @@ public:
         static std::vector<ChatCommand> playerbotsCommandTable =
         {
             { "add",       SEC_GAMEMASTER, true,  &HandleAddCommand,       "" },
+            { "create",    SEC_GAMEMASTER, false, &HandleCreateCommand,    "" },
             { "remove",    SEC_GAMEMASTER, true,  &HandleRemoveCommand,    "" },
             { "removeall", SEC_GAMEMASTER, true,  &HandleRemoveAllCommand, "" },
             { "list",      SEC_GAMEMASTER, true,  &HandleListCommand,      "" }
@@ -231,6 +232,70 @@ public:
         }
 
         handler->PSendSysMessage("Adding bot '%s'...", args);
+        return true;
+    }
+
+    // .playerbots create <class> [spec]: a new bot character on a bot account, at the GM's level, of his faction,
+    // with a random (or the given) spec, talents and gear, brought to him
+    static bool HandleCreateCommand(ChatHandler* handler, char const* args)
+    {
+        Player* player = handler->GetSession() ? handler->GetSession()->GetPlayer() : nullptr;
+        if (!player)
+        {
+            handler->SendSysMessage("Use it in game: the bot takes your level, faction and position.");
+            return true;
+        }
+        if (!sPlayerbotMgr->IsEnabled())
+        {
+            handler->SendSysMessage("Playerbots are disabled (set Playerbots.Enable = 1 in playerbots.conf).");
+            return true;
+        }
+
+        std::string text = args ? args : "";
+        std::string className = text, specName;
+        if (size_t space = text.find(' '); space != std::string::npos)
+        {
+            // "demon hunter havoc": try the longest class name first
+            std::string const twoWords = text.substr(0, text.find(' ', space + 1));
+            if (BotFactory::ClassFromName(twoWords))
+            {
+                className = twoWords;
+                specName = twoWords.size() < text.size() ? text.substr(twoWords.size() + 1) : std::string();
+            }
+            else
+            {
+                className = text.substr(0, space);
+                specName = text.substr(space + 1);
+            }
+        }
+
+        uint8 const cls = BotFactory::ClassFromName(className);
+        if (!cls)
+        {
+            handler->SendSysMessage("Usage: .playerbots create <class> [spec] - classes: warrior paladin hunter rogue priest "
+                "deathknight shaman mage warlock monk druid demonhunter");
+            return true;
+        }
+
+        BotFactory::CreateRequest request;
+        request.cls = cls;
+        if (!specName.empty())
+        {
+            request.specId = BotFactory::SpecFromName(cls, specName);
+            if (!request.specId)
+            {
+                handler->PSendSysMessage("%s has no spec called '%s'.", BotFactory::ClassName(cls), specName.c_str());
+                return true;
+            }
+        }
+        request.level = player->getLevel();
+        request.team = player->GetTeam();
+        request.location = WorldLocation(player->GetMapId(), player->GetPositionX(), player->GetPositionY(),
+            player->GetPositionZ(), player->GetOrientation());
+        request.creator = player->GetGUID();
+
+        sPlayerbotMgr->RequestCreate(request);
+        handler->PSendSysMessage("Creating a level %u %s bot...", uint32(request.level), BotFactory::ClassName(cls));
         return true;
     }
 

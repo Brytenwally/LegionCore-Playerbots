@@ -50,3 +50,47 @@ Playerbots.Combat.EngageRange = 30
 #        Default: 1200
 
 Playerbots.Combat.EngageDelay = 1200
+
+###################################################################################################
+# Creating bots (.playerbots create <class> [spec]) and gear (autogear)
+###################################################################################################
+
+#
+#    Playerbots.Create.AccountPrefix
+#        Created bots live on accounts named <prefix>1, <prefix>2... (made when needed). At least
+#        3 characters. Bots on these accounts are never anyone's alts.
+#        Default: "PLAYERBOT"
+
+Playerbots.Create.AccountPrefix = "PLAYERBOT"
+
+#
+#    Playerbots.Create.AccountPassword
+#        Password of the bot accounts (nobody needs to log into them).
+#        Default: "playerbot"
+
+Playerbots.Create.AccountPassword = "playerbot"
+
+#
+#    Playerbots.Create.CharactersPerAccount
+#        Bot characters per bot account before the next account is made.
+#        Default: 10
+
+Playerbots.Create.CharactersPerAccount = 10
+
+#
+#    Playerbots.AutoGear.MinQuality
+#    Playerbots.AutoGear.MaxQuality
+#        Item qualities a created bot and the "autogear" order may pick:
+#        0 poor, 1 common, 2 uncommon, 3 rare, 4 epic, 5 legendary (artifacts and heirlooms never).
+#        Default: 0, 4
+
+Playerbots.AutoGear.MinQuality = 0
+Playerbots.AutoGear.MaxQuality = 4
+
+#
+#    Playerbots.AutoGear.MaxItemLevel
+#        Highest item level autogear picks (the bot's level still limits items by their required
+#        level). 0 = no limit.
+#        Default: 0
+
+Playerbots.AutoGear.MaxItemLevel = 0

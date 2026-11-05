@@ -16,6 +16,8 @@
 #include "BotCombat.h"
 #include "BotMovement.h"
 #include "BotRotations.h"
+#include "BotFactory.h"
+#include "BotGear.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
@@ -40,6 +42,7 @@ namespace
     float const FollowDistance = 2.0f;
     float const FollowAngle = float(M_PI);                  // behind the leader
     uint32 const CombatCheckInterval = 250;                 // ms between combat checks (one cast at most each)
+    uint32 const TalentCheckInterval = 10000;               // ms between checks for empty talent rows
     float const RangedDistance = 25.0f;                     // ranged roles chase to this distance
     float const RangedStopDistance = 30.0f;                 // ... and stop chasing within this (and in sight)
     float const HealBelowPct = 90.0f;                       // healers heal allies below this
@@ -66,6 +69,15 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         return;
 
     HandleGroupInvite(bot);
+
+    // owner's decision: talents are learned automatically, alts included, into empty rows only
+    _talentTimer += diff;
+    if (_talentTimer >= TalentCheckInterval)
+    {
+        _talentTimer = 0;
+        if (bot->IsAlive() && !bot->isInCombat())
+            BotFactory::FillTalents(bot);
+    }
 
     _combatTimer += diff;
     if (_combatTimer >= CombatCheckInterval)
@@ -163,7 +175,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], player tank, bot tank, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], player tank, bot tank, talents [spec], autogear, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -211,6 +223,17 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "attack")
     {
         AttackOrder(bot, sender);
+        return true;
+    }
+
+    if (order == "autogear")
+    {
+        AutoGearOrder(bot, sender);
+        return true;
+    }
+    if (order == "talents" || order.rfind("talents ", 0) == 0)
+    {
+        TalentsOrder(bot, sender, order.size() > 8 ? text.substr(8) : std::string());
         return true;
     }
 
@@ -1411,3 +1434,72 @@ bool PlayerbotAI::AssistOrder(Player* bot, OrderSender const& sender, std::strin
     Say(bot, sender.guid, std::string(mode.empty() ? "Assist mode " : "Assist mode set to ") + name + ".");
     return true;
 }
+
+// ---- Created bots, talents and gear ------------------------------------------------------------------
+
+void PlayerbotAI::InitializeNewBot(Player* bot, BotFactory::CreateRequest const& request)
+{
+    std::string const summary = BotFactory::InitializeNewBot(bot, request);
+    Say(bot, request.creator, summary + " Say 'talents' to see or change my spec, 'autogear' after a change.");
+}
+
+// "autogear": the best gear for the current spec within playerbots.conf's limits; replaced pieces go to the
+// bags (an order, so it may change an alt)
+void PlayerbotAI::AutoGearOrder(Player* bot, OrderSender const& sender)
+{
+    if (bot->isInCombat())
+    {
+        Say(bot, sender.guid, "Not in combat.");
+        return;
+    }
+    if (!bot->GetSpecializationId())
+    {
+        Say(bot, sender.guid, "I have no spec yet.");
+        return;
+    }
+
+    BotGear::Result const result = BotGear::AutoGear(bot, sPlayerbotMgr->GetGearOptions());
+    std::string text = result.equipped ? "Equipped " + std::to_string(result.equipped) + " item(s)" : std::string("Nothing better found");
+    for (size_t i = 0; i < result.pieces.size() && i < 6; ++i)
+        text += (i ? ", " : ": ") + result.pieces[i];
+    if (result.pieces.size() > 6)
+        text += "...";
+    if (result.noBagRoom)
+        text += ". " + std::to_string(result.noBagRoom) + " upgrade(s) skipped: no room in my bags for the old piece";
+    Say(bot, sender.guid, text + ".");
+    if (result.equipped)
+        bot->SaveToDB();
+}
+
+// "talents": spec and talents; "talents <spec>": switch spec (name or 1-4) and fill the talent rows
+void PlayerbotAI::TalentsOrder(Player* bot, OrderSender const& sender, std::string const& args)
+{
+    std::string wanted = args;
+    while (!wanted.empty() && wanted.front() == ' ')
+        wanted.erase(wanted.begin());
+
+    if (!wanted.empty())
+    {
+        if (bot->isInCombat())
+        {
+            Say(bot, sender.guid, "Not in combat.");
+            return;
+        }
+        uint32 const spec = BotFactory::SpecFromName(bot->getClass(), wanted);
+        if (!spec)
+        {
+            Say(bot, sender.guid, "I have no spec called '" + wanted + "'.");
+            return;
+        }
+        if (spec != bot->GetSpecializationId())
+        {
+            bot->ForceChangeTalentGroup(spec);
+            _throttle.Clear();
+        }
+        BotFactory::FillTalents(bot);
+        bot->SaveToDB();
+    }
+
+    Say(bot, sender.guid, BotFactory::DescribeTalents(bot));
+}
+

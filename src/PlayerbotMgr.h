@@ -12,6 +12,8 @@
 
 #include "Define.h"
 #include "ObjectGuid.h"
+#include "BotFactory.h"
+#include "BotGear.h"
 #include <map>
 #include <memory>
 #include <mutex>
@@ -44,6 +46,11 @@ public:
     // Starts logging the character in as a bot. notifyGuid (may be empty) gets "Bot 'X' logged in."
     // when the character is in the world, or the reason it failed.
     bool AddBot(std::string name, ObjectGuid const& notifyGuid, std::string& error);
+    // Any thread: queues ".playerbots create"; the world thread creates the character, logs it in a few
+    // seconds later (its rows must be in the database) and has it initialized once in the world.
+    void RequestCreate(BotFactory::CreateRequest const& request);
+    BotGear::Options GetGearOptions() const { return _gearOptions; }
+
     // Logs the bot out (saved); its entry goes once the session has ended.
     bool RemoveBot(std::string name, std::string& error);
     void RemoveAllBots();
@@ -76,7 +83,16 @@ private:
         ObjectGuid notifyGuid;
         bool inWorld = false;                               // "logged in" was reported
         bool removing = false;
+        std::shared_ptr<BotFactory::CreateRequest> init;    // a created bot, initialized once in the world
     };
+
+    struct PendingLogin
+    {
+        std::string name;
+        BotFactory::CreateRequest request;
+        uint32 delay = 0;                                   // ms until the login
+    };
+    void ProcessCreates(uint32 diff);
 
     void Notify(ObjectGuid const& guid, std::string const& text) const;
     Bot* FindBotByName(std::string const& name);
@@ -89,6 +105,11 @@ private:
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads
+    BotGear::Options _gearOptions;
+    BotFactory::CreateConfig _createConfig;
+    std::mutex _createLock;
+    std::vector<BotFactory::CreateRequest> _createRequests;  // filled from any thread, read in Update
+    std::vector<PendingLogin> _pendingLogins;               // world thread only
     std::mutex _logoutLock;
     std::vector<uint32> _loggedOutAccounts;                 // filled from map threads, read in Update
 };

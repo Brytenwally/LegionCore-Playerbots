@@ -29,6 +29,16 @@ void PlayerbotMgr::LoadConfig()
     _combatLog = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.Combat.Log", 1), 2);
     _engageRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Combat.EngageRange", 30.0f));
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
+
+    _gearOptions.minQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MinQuality", 0), 5);
+    _gearOptions.maxQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxQuality", 4), 5);
+    _gearOptions.maxItemLevel = sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxItemLevel", 0);
+
+    _createConfig.accountPrefix = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPrefix", "PLAYERBOT");
+    _createConfig.accountPassword = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPassword", "playerbot");
+    _createConfig.charactersPerAccount = std::max<uint32>(1, sConfigMgr->GetIntDefault("Playerbots.Create.CharactersPerAccount", 10));
+    if (_createConfig.accountPrefix.size() < 3)
+        _createConfig.accountPrefix = "PLAYERBOT";
 }
 
 bool PlayerbotMgr::AddBot(std::string name, ObjectGuid const& notifyGuid, std::string& error)
@@ -158,8 +168,61 @@ void PlayerbotMgr::Notify(ObjectGuid const& guid, std::string const& text) const
         ChatHandler(player).SendSysMessage(text.c_str());
 }
 
+void PlayerbotMgr::RequestCreate(BotFactory::CreateRequest const& request)
+{
+    std::lock_guard<std::mutex> lock(_createLock);
+    _createRequests.push_back(request);
+}
+
+void PlayerbotMgr::ProcessCreates(uint32 diff)
+{
+    std::vector<BotFactory::CreateRequest> requests;
+    {
+        std::lock_guard<std::mutex> lock(_createLock);
+        requests.swap(_createRequests);
+    }
+
+    for (BotFactory::CreateRequest const& request : requests)
+    {
+        std::string error;
+        std::string const name = BotFactory::CreateCharacter(request, _createConfig, error);
+        if (name.empty())
+        {
+            TC_LOG_ERROR("server.loading", "[mod-playerbots] .playerbots create failed: %s", error.c_str());
+            Notify(request.creator, "Could not create a bot: " + error);
+            continue;
+        }
+
+        Notify(request.creator, "Created '" + name + "', logging in...");
+        PendingLogin pending;
+        pending.name = name;
+        pending.request = request;
+        pending.delay = 3000;                               // SaveToDB is asynchronous: let the rows land first
+        _pendingLogins.push_back(pending);
+    }
+
+    for (auto itr = _pendingLogins.begin(); itr != _pendingLogins.end();)
+    {
+        if (itr->delay > diff)
+        {
+            itr->delay -= diff;
+            ++itr;
+            continue;
+        }
+
+        std::string error;
+        if (!AddBot(itr->name, itr->request.creator, error))
+            Notify(itr->request.creator, "Could not log in '" + itr->name + "': " + error);
+        else if (Bot* bot = FindBotByName(itr->name))
+            bot->init = std::make_shared<BotFactory::CreateRequest>(itr->request);
+        itr = _pendingLogins.erase(itr);
+    }
+}
+
 void PlayerbotMgr::Update(uint32 diff)
 {
+    ProcessCreates(diff);
+
     // owner's rule (SkyFire): a player logging out takes the bots of his account with him, so his
     // alts are never left running while he logs into one of them
     std::vector<uint32> accounts;
@@ -212,6 +275,19 @@ void PlayerbotMgr::Update(uint32 diff)
                     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logged in (map %u).", bot.name.c_str(), player->GetMapId());
                     // SquidBots Lite (SkyFire) parses this exact text: keep the wording
                     Notify(bot.notifyGuid, "Bot '" + bot.name + "' logged in.");
+
+                    // a created bot: set it up on its own thread
+                    if (bot.init)
+                    {
+                        std::shared_ptr<BotFactory::CreateRequest> init = bot.init;
+                        bot.init.reset();
+                        std::shared_ptr<PlayerbotAI> ai = GetAI(itr->first);
+                        ObjectAccessor::PostToPlayer(itr->first, [ai, init](Player* p) -> void
+                        {
+                            if (ai)
+                                ai->InitializeNewBot(p, *init);
+                        });
+                    }
                 }
 
         ++itr;

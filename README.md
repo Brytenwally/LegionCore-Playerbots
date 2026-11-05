@@ -54,6 +54,12 @@ When you log out, the bots of your account (your alts) log out with you.
   full|defend|passive`; `follow` does not end a fight. A dead
   bot is revived by `summon` in party chat (`Playerbots.Summon.Revive`).
 
+- **Creating bots** (GM): `.playerbots create <class> [spec]` makes a new bot of your faction at
+  your level, with a random (or the given) spec, talents and gear, and brings it to you (bot
+  accounts `PLAYERBOT1`, `PLAYERBOT2`... are created as needed). Orders `talents` (show; `talents
+  <spec>` switches) and `autogear` (best gear for the spec by stat weights, within
+  `Playerbots.AutoGear.*` limits).
+
 ## Install
 
 Clone into the core's `modules/` folder under this exact name (the folder name decides the
