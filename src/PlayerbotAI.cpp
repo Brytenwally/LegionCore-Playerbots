@@ -156,7 +156,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, assist [full|defend|passive], quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -177,8 +177,7 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     std::string const order = Lower(text);
     if (order == "follow")
     {
-        _stay = false;
-        _orderedTarget.Clear();
+        _stay = false;                                      // owner's rule: follow does not end a fight
         _followGuid.Clear();                                // follow again at the next check
         _followTimer = FollowCheckInterval;
         Say(bot, sender.guid, bot->GetGroup() ? "Following." : "Following once I am in your group.");
@@ -207,6 +206,8 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
         return true;
     }
 
+    if (order == "passive")
+        return AssistOrder(bot, sender, "passive");
     if (order == "assist")
         return AssistOrder(bot, sender, "");
     if (order.rfind("assist ", 0) == 0)
@@ -1033,6 +1034,8 @@ Unit* PlayerbotAI::SelectTarget(Player* bot, std::vector<Player*> const& members
         if (Unit* attacker = BotCombat::FindAttackerOf(bot, allies, range))
             return attacker;
     }
+    else
+        return nullptr;                                     // passive: not even self-defence
 
     // self-defence, in every mode
     Unit* attacker = bot->getAttackerForHelper();
@@ -1198,7 +1201,7 @@ void PlayerbotAI::LogSkip(Player* bot, size_t step, char const* spell, std::stri
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' skips %s: %s.", bot->GetName(), spell, reason.c_str());
 }
 
-// "attack": the owner's target, fought until it dies (or "follow"); no engage delay and no never-pull
+// "attack": the owner's target, fought until it dies (or "passive"); no engage delay and no never-pull
 // check, since the owner chose it
 void PlayerbotAI::AttackOrder(Player* bot, OrderSender const& sender)
 {
@@ -1220,13 +1223,19 @@ bool PlayerbotAI::AssistOrder(Player* bot, OrderSender const& sender, std::strin
     else if (mode == "defend")
         _assist = AssistMode::Defend;
     else if (mode == "passive")
+    {
+        // owner's rule: passive drops the fight at once, ordered target included
         _assist = AssistMode::Passive;
+        _orderedTarget.Clear();
+        if (_engaged)
+            StopCombat(bot, "passive order");
+    }
     else if (!mode.empty())
         return false;
 
     char const* name = _assist == AssistMode::Full ? "full: I fight whatever attacks the group" :
         _assist == AssistMode::Defend ? "defend: I fight only what attacks you or me" :
-        "passive: I fight only what you order and what attacks me";
+        "passive: I fight nothing, not even what attacks me, until you order attack or set another mode";
     Say(bot, sender.guid, std::string(mode.empty() ? "Assist mode " : "Assist mode set to ") + name + ".");
     return true;
 }

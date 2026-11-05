@@ -46,7 +46,9 @@ When you log out, the bots of your account (your alts) log out with you.
   themselves), within 30 yards, after a short delay so you swing first; tanks and melee chase the
   enemy, ranged stay at about 25 yards, healers stay with you and heal. Each spec casts a simple
   priority list (all 36 specs, spell names looked up in the server's spell data). Orders:
-  `attack` (your target, until it dies or you say `follow`), `assist full|defend|passive`. A dead
+  `attack` (your target, until it dies or you say `passive`), `passive` (stop fighting and fight
+  nothing, not even what attacks the bot, until `attack` or `assist full|defend`), `assist
+  full|defend|passive`; `follow` does not end a fight. A dead
   bot is revived by `summon` in party chat (`Playerbots.Summon.Revive`).
 
 ## Install

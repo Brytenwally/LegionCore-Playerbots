@@ -108,10 +108,10 @@ private:
     {
         Full,                                               // whatever attacks the group
         Defend,                                             // only what attacks the owner or the bot
-        Passive                                             // only ordered targets and self-defence
+        Passive                                             // nothing but an ordered target, no self-defence
     };
     AssistMode _assist = AssistMode::Full;
-    ObjectGuid _orderedTarget;                              // "attack" order: fought until it dies
+    ObjectGuid _orderedTarget;                              // "attack" order: fought until it dies or "passive"
     ObjectGuid _combatTarget;                               // the enemy engaged (melee/ranged chase)
     bool _engaged = false;
     uint32 _combatTimer = 0;

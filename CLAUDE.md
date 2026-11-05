@@ -175,18 +175,19 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
 - Compiled in the container against the core (scripts PCH), and on Windows in LegionCore-Build
   run #15 (core `77189b3` + `092a80c`), 2026-11-03.
 
-## Combat (plan steps 4.1 + 4.2, 2026-11-05, not yet tested on the server)
+## Combat (plan steps 4.1 + 4.2, 2026-11-05)
 
-Built on Windows in LegionCore-Build run #17 (core `1da7859` + `8599f44`); runtime untested.
+Built on Windows in LegionCore-Build run #17 (core `1da7859` + `8599f44`); **works on the owner's
+server** (see Status, 2026-11-05).
 
 - `PlayerbotAI::UpdateCombat` every 250 ms on the bot's thread (before follow; `UpdateFollow` does
   nothing while `_engaged` or casting, since movement would break a cast).
 - Target (`SelectTarget`, LegionBotAI's rules): an `attack`-ordered target first (the owner's
   `GetSelection()`, read in his thread into `OrderSender::selection`; no delay, no range, no
   never-pull check); else, by `assist` mode (`full` default: any group member, the owner first;
-  `defend`: the owner and the bot; `passive`: none) the bot's current victim if still attacking an
+  `defend`: the owner and the bot) the bot's current victim if still attacking an
   ally, the owner's victim if attacking an ally, or the first attacker of an ally
-  (`FindAttackerOf`); in every mode self-defence (`getAttackerForHelper`). Only within
+  (`FindAttackerOf`); in full/defend also self-defence (`getAttackerForHelper`). Only within
   `Playerbots.Combat.EngageRange` (30 yd) of the bot. A new enemy waits
   `Playerbots.Combat.EngageDelay` (1200 ms, `EngageTimer`).
 - Engage: tank/melee `Attack(enemy, true)` + `MoveChase(enemy)`; ranged `Attack(enemy, false)` +
@@ -212,6 +213,11 @@ Built on Windows in LegionCore-Build run #17 (core `1da7859` + `8599f44`); runti
   `Bot 'X' stops fighting: reason.`; 2 = also `Bot 'X' skips Spell: reason` (not known, condition
   not met: ..., on cooldown, global cooldown, AI delay, cast failed (result N) = `SpellCastResult`),
   logged when a step's reason changes.
+- Owner's design rules (2026-11-05, after testing build #17): **`follow` does not interfere with
+  a fight** (it no longer clears the ordered target; combat keeps the movement while engaged);
+  **`passive`** (= `assist passive`) makes the bot passive towards enemies: it stops its fight at
+  once, drops the ordered target and fights nothing, not even self-defence, until `attack` (an
+  ordered target is still fought) or `assist full|defend`. Healing goes on.
 - Not yet: taunts and tank threat (4.4), defensives/potions (4.5), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
 
@@ -242,6 +248,14 @@ Built on Windows in LegionCore-Build run #17 (core `1da7859` + `8599f44`); runti
 - 2026-11-03, owner's test of build #14 (core `66e10fd` + `d935051`): **everything works**
   (previous-quest copies taken mirrored and by order). Step 3's group/orders/quests part is done;
   next: basic combat (owner: from LegionBotAI, see the core's `CLAUDE.md`).
+- 2026-11-05, owner's test of build #17 (core `1da7859` + `8599f44`), Affliction warlock bot at
+  levels 5 and 10, `attack` order and `assist full`: **combat and rotations work** (engages after
+  the delay, casts Agony 980 / Corruption 172, re-applies them when they drop, stops when no enemy
+  is left; never-pull respected). The lists are basic: Affliction idles between DoTs at low level
+  (Unstable Affliction / Drain Soul not known yet, Shadow Bolt not in its list); refining the
+  rotations comes later, the owner wants systems first. Startup: `Rotations: 36 specs, 169 spell
+  names, 2 not found`: `demonic core` (Demonology's proc aura has another name on 7.3.5) and
+  `wildfire bomb` (a Battle for Azeroth spell, not in 7.3.5: Survival's first step never fires).
 
 ## Checking
 
