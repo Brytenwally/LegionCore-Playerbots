@@ -306,7 +306,12 @@ server** (see Status, 2026-11-05).
   - **Rest** (`PlayerbotAI::UpdateRest`, SkyFire's `CastRefreshmentSpell`): out of combat (nobody in
     the group fighting, no enemy), below `Playerbots.Rest.HealthPct` (60) / `ManaPct` (50): stop,
     sit, `AddAura` of SkyFire's level-tier food and drink spells (433..104934 / 430..104262; no
-    item; tiers stop at 85, so level 85+ bots use the MoP tier). Stands up (auras removed) when
+    item) up to level 85; **above 85 (owner: scale it to 110)** the spell comes from the server's
+    own items (`BuildRestIndex`, once: Food & Drink consumables whose on-use spell has
+    `AURA_INTERRUPT_FLAG_NOT_SEATED` and an `OBS_MOD_HEALTH` / `MOD_REGEN` aura = food, an
+    `OBS_MOD_POWER` / `MOD_POWER_REGEN` mana aura = drink; the highest required level at or below
+    the bot's, then the highest item level; SkyFire's tier if none). Logged once: `Rest: N food
+    and M drink spells from items.` Stands up (auras removed) when
     full, when a fight starts or when its leader is more than 20 yd away; follow and combat wait
     while `_resting`.
 - Not yet: tank threat bonus (owner: no), ground-effect dodge

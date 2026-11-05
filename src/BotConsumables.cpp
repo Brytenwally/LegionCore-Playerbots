@@ -10,6 +10,11 @@
 #include "Player.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Log.h"
+#include "ObjectMgr.h"
+#include <algorithm>
+#include <mutex>
+#include <vector>
 
 namespace BotConsumables
 {
@@ -55,6 +60,67 @@ namespace BotConsumables
             { 25, 1133 }, { 15, 432 }, { 5, 431 }, { 1, 430 },
         };
 
+        // Food and drink above SkyFire's tiers (owner, 2026-11-05: scale the list to 110): read once from the
+        // server's own items: Food & Drink consumables whose on-use spell is a seated aura
+        // (AURA_INTERRUPT_FLAG_NOT_SEATED) that restores health (OBS_MOD_HEALTH / MOD_REGEN) or mana
+        // (OBS_MOD_POWER / MOD_POWER_REGEN of mana); for a level the item with the highest required level at
+        // or below it, then the highest item level. SkyFire's tiers stay the fallback.
+        struct RestItem
+        {
+            uint32 requiredLevel;
+            uint32 itemLevel;
+            uint32 spellId;
+        };
+        std::once_flag restOnce;
+        std::vector<RestItem> foodItems, drinkItems;
+
+        void BuildRestIndex()
+        {
+            for (auto const& pair : *sObjectMgr->GetItemTemplateStore())
+            {
+                ItemTemplate const* proto = &pair.second;
+                if (proto->GetClass() != ITEM_CLASS_CONSUMABLE || proto->GetSubClass() != ITEM_SUBCLASS_FOOD_DRINK)
+                    continue;
+                for (ItemEffectEntry const* effect : proto->Effects)
+                {
+                    if (!effect || effect->SpellID <= 0 || effect->TriggerType != ITEM_SPELLTRIGGER_ON_USE)
+                        continue;
+                    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(uint32(effect->SpellID));
+                    if (!spellInfo || !spellInfo->HasAuraInterruptFlag(AURA_INTERRUPT_FLAG_NOT_SEATED))
+                        continue;
+                    bool food = false, drink = false;
+                    for (SpellEffectInfo const* spellEffect : spellInfo->Effects)
+                    {
+                        if (!spellEffect)
+                            continue;
+                        uint32 const aura = spellEffect->ApplyAuraName;
+                        if (aura == SPELL_AURA_OBS_MOD_HEALTH || aura == SPELL_AURA_MOD_REGEN)
+                            food = true;
+                        if ((aura == SPELL_AURA_OBS_MOD_POWER || aura == SPELL_AURA_MOD_POWER_REGEN) && spellEffect->MiscValue == POWER_MANA)
+                            drink = true;
+                    }
+                    RestItem const item{ uint32(std::max(1, proto->GetBaseRequiredLevel())), proto->GetBaseItemLevel(), spellInfo->Id };
+                    if (food)
+                        foodItems.push_back(item);
+                    if (drink)
+                        drinkItems.push_back(item);
+                }
+            }
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Rest: %u food and %u drink spells from items.",
+                uint32(foodItems.size()), uint32(drinkItems.size()));
+        }
+
+        uint32 ItemRestSpell(std::vector<RestItem> const& items, uint8 level)
+        {
+            RestItem const* best = nullptr;
+            for (RestItem const& item : items)
+                if (item.requiredLevel <= level &&
+                    (!best || item.requiredLevel > best->requiredLevel ||
+                     (item.requiredLevel == best->requiredLevel && item.itemLevel > best->itemLevel)))
+                    best = &item;
+            return best ? best->spellId : 0;
+        }
+
         template <size_t N>
         uint32 TierSpell(RestTier const (&tiers)[N], uint8 level)
         {
@@ -78,6 +144,18 @@ namespace BotConsumables
         {
             for (RestTier const& tier : tiers)
                 bot->RemoveAurasDueToSpell(tier.spellId);
+        }
+
+        // the food / drink aura for a level: from the items when they reach further than SkyFire's tiers
+        // (above 85), else SkyFire's tier
+        uint32 RestSpell(bool drink, uint8 level)
+        {
+            std::call_once(restOnce, BuildRestIndex);
+            uint32 const tier = drink ? TierSpell(DrinkTiers, level) : TierSpell(FoodTiers, level);
+            if (level <= 85)
+                return tier;
+            uint32 const fromItems = ItemRestSpell(drink ? drinkItems : foodItems, level);
+            return fromItems ? fromItems : tier;
         }
     }
 
@@ -113,11 +191,11 @@ namespace BotConsumables
 
         uint8 const level = bot->getLevel();
         if (needHealth)
-            if (uint32 spell = TierSpell(FoodTiers, level))
+            if (uint32 spell = RestSpell(false, level))
                 if (sSpellMgr->GetSpellInfo(spell) && !bot->HasAura(spell))
                     bot->AddAura(spell, bot);
         if (needMana)
-            if (uint32 spell = TierSpell(DrinkTiers, level))
+            if (uint32 spell = RestSpell(true, level))
                 if (sSpellMgr->GetSpellInfo(spell) && !bot->HasAura(spell))
                     bot->AddAura(spell, bot);
     }
@@ -126,12 +204,17 @@ namespace BotConsumables
     {
         RemoveTiers(bot, FoodTiers);
         RemoveTiers(bot, DrinkTiers);
+        uint8 const level = bot->getLevel();
+        bot->RemoveAurasDueToSpell(RestSpell(false, level));
+        bot->RemoveAurasDueToSpell(RestSpell(true, level));
         if (bot->getStandState() == UNIT_STAND_STATE_SIT)
             bot->SetStandState(UNIT_STAND_STATE_STAND);
     }
 
     bool HasRestAura(Player* bot)
     {
-        return HasTier(bot, FoodTiers) || HasTier(bot, DrinkTiers);
+        uint8 const level = bot->getLevel();
+        return HasTier(bot, FoodTiers) || HasTier(bot, DrinkTiers) ||
+            bot->HasAura(RestSpell(false, level)) || bot->HasAura(RestSpell(true, level));
     }
 }
