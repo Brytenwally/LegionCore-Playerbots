@@ -75,8 +75,13 @@ When you log out, the bots of your account (your alts) log out with you.
   your party. It first uses a free bot of that class from the database (the startup pool,
   `Playerbots.Pool.*`: bot accounts and characters made at startup, some logged in on GM Island),
   and only creates a new character when there is none. Orders `talents` (show; `talents
-  <spec>` switches) and `autogear` (best gear for the spec by stat weights, within
-  `Playerbots.AutoGear.*` limits).
+  <spec>` switches) and `autogear` (upgrades for the spec by stat weights, each a random one of
+  the 5 best for its slot, within `Playerbots.AutoGear.*` limits; empty bag slots get large bags
+  first, replaced pieces go to the bags).
+- **Dismissing a random bot** (it leaves or is removed from your group, or you log out for a
+  minute): it leaves the group, loses everything it carries except its bags, goes back to level 1
+  (death knights 55, demon hunters 98) and returns to GM Island for the next player. `.playerbots
+  remove` resets it the same way before logging it out. Alt bots still just log out.
 
 ## Install
 

@@ -92,6 +92,10 @@ namespace BotFactory
     // Bot's thread, once in the world: level, spec, talents, gear, then off to the creator.
     // Returns what was done, for the creator.
     std::string InitializeNewBot(Player* bot, CreateRequest const& request);
+    // Owner's rule (2026-11-05) for a dismissed random bot: revived, inventory cleared except its bags, back
+    // to its class's starting level (1; death knight 55, demon hunter 98), saved, and to GM Island when
+    // toGMIsland. Returns the number of items destroyed.
+    uint32 ResetBot(Player* bot, bool toGMIsland);
 
     // Fills each empty unlocked talent row (a row with a talent keeps it: owner's rule, alts included).
     // Returns the number of talents learned. Not in combat (Player::LearnTalent refuses).

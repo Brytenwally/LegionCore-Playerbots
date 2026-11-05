@@ -552,6 +552,34 @@ namespace BotFactory
         return buffer;
     }
 
+    uint32 ResetBot(Player* bot, bool toGMIsland)
+    {
+        if (bot->isDead())
+        {
+            bot->ResurrectPlayer(1.0f);
+            bot->SpawnCorpseBones();
+        }
+        bot->CombatStop();
+        bot->GetMotionMaster()->Clear();
+        bot->GetMotionMaster()->MoveIdle();
+
+        uint32 const destroyed = BotGear::ClearInventory(bot);
+
+        // hero classes cannot go below their starting level (owner's rule for .playerbots create)
+        uint8 const startLevel = bot->getClass() == CLASS_DEATH_KNIGHT ? 55 : bot->getClass() == CLASS_DEMON_HUNTER ? 98 : 1;
+        if (bot->getLevel() != startLevel)
+            bot->GiveLevel(startLevel);
+        bot->SetUInt32Value(PLAYER_FIELD_XP, 0);
+        bot->SetFullHealth();
+
+        bot->SaveToDB();
+        if (toGMIsland)
+            bot->TeleportTo(1, 16222.1f, 16252.1f, 12.5872f, 1.35f);
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' reset: level %u, %u item(s) destroyed (bags kept).",
+            bot->GetName(), uint32(startLevel), destroyed);
+        return destroyed;
+    }
+
     uint32 FillTalents(Player* bot)
     {
         if (bot->isInCombat() || bot->isDead())

@@ -26,6 +26,11 @@ namespace BotGear
         uint32 maxQuality = 4;          // epic
         uint32 maxItemLevel = 0;        // 0 = no limit (the bot's level still limits by required level)
         bool destroyReplaced = false;   // a new bot's starting gear is destroyed, otherwise it goes to the bags
+        // owner's rule (2026-11-05): each slot takes a random one of its `choices` best upgrades (fewer when
+        // fewer exist), so bots of a spec do not all look alike; Playerbots.AutoGear.Choices
+        uint32 choices = 5;
+        // put in the empty bag slots before gearing (owner's rule); 0 = the first of BagFallbacks that exists
+        uint32 bagEntry = 0;
 
         // item level cap by bot level (owner's values, 2026-11-05; Playerbots.AutoGear.IlvlCap.*): below 60
         // level + belowSixtyAdd, then level x the bracket's factor; 110 has only maxItemLevel
@@ -42,13 +47,20 @@ namespace BotGear
     {
         uint32 equipped = 0;
         uint32 noBagRoom = 0;           // upgrades skipped because the old piece did not fit in the bags
+        uint32 bagsAdded = 0;
         std::vector<std::string> pieces;// names of the items put on
     };
 
     // value of the item for the bot's current spec at itemLevel (0 for an unknown spec)
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel);
-    // equips, slot by slot, the best candidate that beats what the bot wears
+    // equips, slot by slot, a random one of the best candidates that beat what the bot wears; first fills
+    // the empty bag slots with large bags
     Result AutoGear(Player* bot, Options const& options);
+    // large bags into the empty bag slots; returns how many were added
+    uint32 AddBags(Player* bot, uint32 bagEntry);
+    // Owner's rule for a dismissed random bot: every item it carries or wears is destroyed except the bags in
+    // its bag slots (and their slots stay). Returns the number of items destroyed.
+    uint32 ClearInventory(Player* bot);
 }
 
 #endif

@@ -192,6 +192,7 @@ private:
     void ProcessCreates(uint32 diff);
 
     void Notify(ObjectGuid const& guid, std::string const& text) const;
+    void LogoutAndReset(Bot& bot);
     Bot* FindBotByName(std::string const& name);
 
     bool _enabled = false;

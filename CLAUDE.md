@@ -72,6 +72,14 @@ come first.
     Not when the bot left by the `leave` order (`_leftByOrder`). A logged-out owner stays a group
     member, so that case is the 60 s rule, not this one. The bot calls `LogoutBot()` itself (a flag;
     the session logs out on its own thread and the manager drops the entry).
+  - **Changed for random bots (owner, 2026-11-05): dismissed, not logged out.** In both cases above (and
+    when a dungeon finder fill is no longer needed) a bot-account bot runs `PlayerbotAI::Dismiss`: queued
+    `CMSG_LEAVE_GROUP` if grouped, `BotFactory::ResetBot` (revive, `BotGear::ClearInventory`: every item
+    worn, in the backpack and in the bags destroyed, the bags in the bag slots kept; `GiveLevel` down to 1,
+    death knight 55, demon hunter 98; XP 0; `SaveToDB`; teleport to GM Island), then `RequestRelease` (world
+    thread: no master, new masterless AI). `_dismissed` stops the old AI until it is replaced. Alt bots keep
+    the logout. `.playerbots remove` / `removeall` reset a random bot (no teleport) before logging it out
+    (`PlayerbotMgr::LogoutAndReset`), so the stored character goes back to the pool clean.
 - GM commands: `.playerbots add <name>`, `remove <name>`, `removeall`, `list`. Need
   `Playerbots.Enable = 1`. Any character of any account; must not be online.
 
@@ -386,6 +394,18 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   still too generous (owner, build #22): now the owner's brackets, configurable
   (`Playerbots.AutoGear.IlvlCap.*`, `BotGear::Options`): levels 1-59 level + 6, 60-69 x1.3, 70-79
   x2, 80-84 x2.8, 85-89 x4.6, 90-99 x5.8, 100-109 x7, 110 only `MaxItemLevel`.
+- **Autogear skipped the head slot** (owner's report, 2026-11-05): candidates were bucketed by "kind" = the
+  equipment slot, and `0` meant "no kind" (`if (!kind) continue;`), but `EQUIPMENT_SLOT_HEAD` is 0: no
+  helmet was ever a candidate. Kinds are now slot + 1 (`KIND_NONE` = 0). **Rule: never use a slot number
+  (head = 0) as a "found" flag.** Also asked then: autogear first puts a large bag in each empty bag slot
+  (`BotGear::AddBags`, `Playerbots.AutoGear.BagEntry`, 0 = Hexweave Bag 114821, else Royal Satchel 82446,
+  Embersilk 54443, Frostweave 41599, the first that is a bag on the server), so replaced pieces always find
+  room (the backpack alone filled after two autogears); each slot takes a **random one of its best
+  `Playerbots.AutoGear.Choices` (5) upgrades** over the worn piece (fewer when fewer exist): `pick` among the
+  kind's top list; rings / trinkets exclude the item in the other slot; weapons: the layout (two-hander,
+  main + off...) is chosen by the best candidates, then a random main and off among that layout's top, or
+  the best pair if the random pair does not beat what is held. Replaced pieces go to the bags (destroyed
+  only at a new bot's initialization).
 - **Owner's requests after that test (2026-11-05):**
   - A created bot **joins its creator's party**: 3 s after its setup, `PlayerbotAI::SendCreatorInvite`
     queues `CMSG_PARTY_INVITE` on the creator's session (`sWorld->FindSession(creatorAccount)`,

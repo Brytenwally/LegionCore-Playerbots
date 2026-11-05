@@ -95,6 +95,24 @@ Playerbots.AutoGear.MaxQuality = 4
 
 Playerbots.AutoGear.MaxItemLevel = 0
 
+#
+#    Playerbots.AutoGear.Choices
+#        Autogear lists the best upgrades for each slot (up to this many) and puts on one of them
+#        at random, so bots of a spec do not all wear the same items. Fewer when fewer exist; only
+#        pieces better than the one worn are listed. 1 = always the best.
+#        Default: 5
+
+Playerbots.AutoGear.Choices = 5
+
+#
+#    Playerbots.AutoGear.BagEntry
+#        Before gearing, autogear puts a bag in each empty bag slot. Item entry of that bag;
+#        0 = the first that exists of Hexweave Bag (114821, 30 slots), Royal Satchel (82446),
+#        Embersilk Bag (54443), Frostweave Bag (41599).
+#        Default: 0
+
+Playerbots.AutoGear.BagEntry = 0
+
 
 #
 #    Playerbots.AutoGear.IlvlCap.*

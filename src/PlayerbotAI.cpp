@@ -78,7 +78,7 @@ bool PlayerbotAI::IsMaster(ObjectGuid const& guid, uint32 accountId) const
 
 void PlayerbotAI::Update(Player* bot, uint32 diff)
 {
-    if (!bot->IsInWorld() || bot->IsBeingTeleported())
+    if (_dismissed || !bot->IsInWorld() || bot->IsBeingTeleported())
         return;
 
     if (_selfBot)
@@ -1650,6 +1650,8 @@ void PlayerbotAI::AutoGearOrder(Player* bot, OrderSender const& sender)
 
     BotGear::Result const result = BotGear::AutoGear(bot, sPlayerbotMgr->GetGearOptions());
     std::string text = result.equipped ? "Equipped " + std::to_string(result.equipped) + " item(s)" : std::string("Nothing better found");
+    if (result.bagsAdded)
+        text = "Added " + std::to_string(result.bagsAdded) + " bag(s). " + text;
     for (size_t i = 0; i < result.pieces.size() && i < 6; ++i)
         text += (i ? ", " : ": ") + result.pieces[i];
     if (result.pieces.size() > 6)
@@ -1657,7 +1659,7 @@ void PlayerbotAI::AutoGearOrder(Player* bot, OrderSender const& sender)
     if (result.noBagRoom)
         text += ". " + std::to_string(result.noBagRoom) + " upgrade(s) skipped: no room in my bags for the old piece";
     Say(bot, sender.guid, text + ".");
-    if (result.equipped)
+    if (result.equipped || result.bagsAdded)
         bot->SaveToDB();
 }
 
@@ -1730,8 +1732,8 @@ void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
     if (_groupLogoutTimer < 0)
     {
         _groupLogoutTimer = GroupLeftLogoutDelay;
-        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is no longer in its owner's group: logging out in %d s.",
-            bot->GetName(), GroupLeftLogoutDelay / 1000);
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is no longer in its owner's group: %s in %d s.",
+            bot->GetName(), _randomBot ? "back to GM Island" : "logging out", GroupLeftLogoutDelay / 1000);
         return;
     }
 
@@ -1741,6 +1743,11 @@ void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
 
     _groupLogoutTimer = -1;
     _wasWithOwner = false;
+    if (_randomBot)
+    {
+        Dismiss(bot, "it left its owner's group");
+        return;
+    }
     // out of a dungeon finder group first, so the group does not keep an offline member in the dungeon
     if (group && group->isLFGGroup())
     {
@@ -1961,4 +1968,28 @@ bool PlayerbotAI::AbandonLfg(Player* bot)
         sLFGMgr->LeaveLfg(bot->GetGUID());
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves the dungeon finder: its queuer left the queue.", bot->GetName());
     return true;
+}
+
+void PlayerbotAI::Dismiss(Player* bot, char const* why)
+{
+    if (_dismissed)
+        return;
+
+    if (!_randomBot)
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out: %s.", bot->GetName(), why);
+        bot->GetSession()->LogoutBot();
+        return;
+    }
+
+    _dismissed = true;
+    if (bot->GetGroup())
+    {
+        WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
+        *packet << int8(0);
+        bot->GetSession()->QueuePacket(packet);
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' dismissed (%s): reset and back to GM Island.", bot->GetName(), why);
+    BotFactory::ResetBot(bot, true);
+    sPlayerbotMgr->RequestRelease(bot->GetGUID());
 }

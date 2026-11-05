@@ -4,6 +4,7 @@
 
 #include "BotGear.h"
 #include "DB2Stores.h"
+#include "Bag.h"
 #include "Item.h"
 #include "ItemEnchantmentMgr.h"
 #include "ItemTemplate.h"
@@ -252,24 +253,31 @@ namespace BotGear
         uint32 const armorType = WornArmorType(bot);
         Hands const hands = HandsFor(spec);
 
+        result.bagsAdded = AddBags(bot, options.bagEntry);
+
         struct Candidate
         {
             ItemTemplate const* proto = nullptr;
             float score = 0.0f;
         };
-        // best two of each kind (rings and trinkets need two distinct items)
+        // the best `keep` of each kind: the random choice among the top `choices`, plus one more so rings,
+        // trinkets and dual wield still find a second distinct item
+        size_t const choices = std::max<uint32>(1, options.choices);
+        size_t const keep = choices + 1;
         std::unordered_map<uint32, std::vector<Candidate>> best;
-        auto offer = [&best](uint32 kind, ItemTemplate const* proto, float score)
+        auto offer = [&best, keep](uint32 kind, ItemTemplate const* proto, float score)
         {
             std::vector<Candidate>& list = best[kind];
             list.push_back({ proto, score });
             std::sort(list.begin(), list.end(), [](Candidate const& a, Candidate const& b) { return a.score > b.score; });
-            if (list.size() > 2)
-                list.resize(2);
+            if (list.size() > keep)
+                list.resize(keep);
         };
 
-        // kinds: equipment slots for armor; weapons by how they are held
-        enum : uint32 { KIND_2H = 100, KIND_1H_MAIN, KIND_1H_OFF, KIND_SHIELD, KIND_HELD, KIND_RANGED };
+        // kinds: equipment slot + 1 for armor (the head slot is 0, and 0 meant "no kind": no helmet was ever
+        // a candidate, the owner's "autogear skips the head" report); weapons by how they are held
+        enum : uint32 { KIND_NONE = 0, KIND_2H = 100, KIND_1H_MAIN, KIND_1H_OFF, KIND_SHIELD, KIND_HELD, KIND_RANGED };
+        auto slotKind = [](uint8 slot) -> uint32 { return uint32(slot) + 1; };
 
         for (auto const& pair : *sObjectMgr->GetItemTemplateStore())
         {
@@ -290,22 +298,22 @@ namespace BotGear
                 continue;
 
             InventoryType const type = proto->GetInventoryType();
-            uint32 kind = 0;
+            uint32 kind = KIND_NONE;
             switch (type)
             {
-                case INVTYPE_HEAD:      kind = EQUIPMENT_SLOT_HEAD; break;
-                case INVTYPE_NECK:      kind = EQUIPMENT_SLOT_NECK; break;
-                case INVTYPE_SHOULDERS: kind = EQUIPMENT_SLOT_SHOULDERS; break;
+                case INVTYPE_HEAD:      kind = slotKind(EQUIPMENT_SLOT_HEAD); break;
+                case INVTYPE_NECK:      kind = slotKind(EQUIPMENT_SLOT_NECK); break;
+                case INVTYPE_SHOULDERS: kind = slotKind(EQUIPMENT_SLOT_SHOULDERS); break;
                 case INVTYPE_CHEST:
-                case INVTYPE_ROBE:      kind = EQUIPMENT_SLOT_CHEST; break;
-                case INVTYPE_WAIST:     kind = EQUIPMENT_SLOT_WAIST; break;
-                case INVTYPE_LEGS:      kind = EQUIPMENT_SLOT_LEGS; break;
-                case INVTYPE_FEET:      kind = EQUIPMENT_SLOT_FEET; break;
-                case INVTYPE_WRISTS:    kind = EQUIPMENT_SLOT_WRISTS; break;
-                case INVTYPE_HANDS:     kind = EQUIPMENT_SLOT_HANDS; break;
-                case INVTYPE_FINGER:    kind = EQUIPMENT_SLOT_FINGER1; break;
-                case INVTYPE_TRINKET:   kind = EQUIPMENT_SLOT_TRINKET1; break;
-                case INVTYPE_CLOAK:     kind = EQUIPMENT_SLOT_BACK; break;
+                case INVTYPE_ROBE:      kind = slotKind(EQUIPMENT_SLOT_CHEST); break;
+                case INVTYPE_WAIST:     kind = slotKind(EQUIPMENT_SLOT_WAIST); break;
+                case INVTYPE_LEGS:      kind = slotKind(EQUIPMENT_SLOT_LEGS); break;
+                case INVTYPE_FEET:      kind = slotKind(EQUIPMENT_SLOT_FEET); break;
+                case INVTYPE_WRISTS:    kind = slotKind(EQUIPMENT_SLOT_WRISTS); break;
+                case INVTYPE_HANDS:     kind = slotKind(EQUIPMENT_SLOT_HANDS); break;
+                case INVTYPE_FINGER:    kind = slotKind(EQUIPMENT_SLOT_FINGER1); break;
+                case INVTYPE_TRINKET:   kind = slotKind(EQUIPMENT_SLOT_TRINKET1); break;
+                case INVTYPE_CLOAK:     kind = slotKind(EQUIPMENT_SLOT_BACK); break;
                 case INVTYPE_2HWEAPON:  kind = KIND_2H; break;
                 case INVTYPE_WEAPON:    kind = KIND_1H_MAIN; break;    // also offered as an off-hand below
                 case INVTYPE_WEAPONMAINHAND: kind = KIND_1H_MAIN; break;
@@ -319,7 +327,7 @@ namespace BotGear
                     break;
                 default: break;
             }
-            if (!kind)
+            if (kind == KIND_NONE)
                 continue;
             if (IsBodyArmor(type) && proto->GetSubClass() != armorType)
                 continue;
@@ -387,59 +395,105 @@ namespace BotGear
             return (itr != best.end() && itr->second.size() > index) ? itr->second[index] : Candidate();
         };
 
+        // a random one of the kind's best `choices` candidates scoring above minScore and not `exclude` (an
+        // item already chosen for the other ring / trinket / hand slot); none when no candidate beats it
+        auto pick = [&best, choices](uint32 kind, float minScore, ItemTemplate const* exclude) -> Candidate
+        {
+            std::vector<Candidate> pool;
+            auto itr = best.find(kind);
+            if (itr != best.end())
+                for (Candidate const& c : itr->second)
+                    if (c.proto != exclude && c.score > minScore && pool.size() < choices)
+                        pool.push_back(c);
+            return pool.empty() ? Candidate() : pool[urand(0, pool.size() - 1)];
+        };
+        auto wornProto = [bot](uint8 slot) -> ItemTemplate const*
+        {
+            Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
+            return item ? item->GetTemplate() : nullptr;
+        };
+
         // armor and jewellery, slot by slot: only upgrades
         static uint8 const singleSlots[] = { EQUIPMENT_SLOT_HEAD, EQUIPMENT_SLOT_NECK, EQUIPMENT_SLOT_SHOULDERS,
             EQUIPMENT_SLOT_CHEST, EQUIPMENT_SLOT_WAIST, EQUIPMENT_SLOT_LEGS, EQUIPMENT_SLOT_FEET,
             EQUIPMENT_SLOT_WRISTS, EQUIPMENT_SLOT_HANDS, EQUIPMENT_SLOT_BACK };
         for (uint8 slot : singleSlots)
         {
-            Candidate c = top(slot);
-            if (c.proto && c.score > wornScore(slot))
+            Candidate c = pick(slotKind(slot), wornScore(slot), nullptr);
+            if (c.proto)
                 equip(slot, c.proto);
         }
+        // two distinct rings / trinkets (both are often unique-equipped)
         for (uint8 base : { uint8(EQUIPMENT_SLOT_FINGER1), uint8(EQUIPMENT_SLOT_TRINKET1) })
             for (uint8 n = 0; n < 2; ++n)
             {
-                Candidate c = top(base, n);
                 uint8 const slot = base + n;
-                if (c.proto && c.score > wornScore(slot))
+                Candidate c = pick(slotKind(base), wornScore(slot), wornProto(n ? base : base + 1));
+                if (c.proto)
                     equip(slot, c.proto);
             }
 
-        // weapons: the best way to fill both hands for the spec, against what the bot holds now
-        Candidate twoHand = top(KIND_2H), twoHand2 = top(KIND_2H, 1), mainHand = top(KIND_1H_MAIN),
-            offWeapon = top(KIND_1H_OFF), shield = top(KIND_SHIELD), held = top(KIND_HELD), ranged = top(KIND_RANGED);
-        if (offWeapon.proto && offWeapon.proto == mainHand.proto)
-            offWeapon = top(KIND_1H_OFF, 1);    // a second copy may be unique-equipped
-
-        Candidate newMain, newOff;
-        auto consider = [&](Candidate const& main, Candidate const& off)
+        // weapons: the best way to fill both hands for the spec (by the best candidates), against what the bot
+        // holds now; then a random pick among the top candidates of that layout
+        uint32 mainKind = KIND_NONE, offKind = KIND_NONE;
+        float layoutScore = 0.0f;
+        auto consider = [&](uint32 main, uint32 off)
         {
-            if (!main.proto)
+            Candidate const m = top(main);
+            if (!m.proto)
                 return;
-            if (main.score + off.score > newMain.score + newOff.score)
+            Candidate o;
+            if (off != KIND_NONE)
             {
-                newMain = main;
-                newOff = off;
+                o = top(off);
+                if (o.proto == m.proto)
+                    o = top(off, 1);                        // a second copy may be unique-equipped
+            }
+            if (m.score + o.score > layoutScore)
+            {
+                layoutScore = m.score + o.score;
+                mainKind = main;
+                offKind = o.proto ? off : KIND_NONE;
             }
         };
         switch (hands)
         {
-            case Hands::TwoHand:       consider(twoHand, Candidate()); break;
-            case Hands::Ranged:        consider(ranged, Candidate()); break;
-            case Hands::OneHandShield: consider(mainHand, shield); break;
-            case Hands::DualWield:     consider(mainHand, offWeapon); break;
-            case Hands::Caster:        consider(twoHand, Candidate()); consider(mainHand, held); break;
-            case Hands::CasterShield:  consider(twoHand, Candidate()); consider(mainHand, shield); break;
-            case Hands::DualOrTwoHand: consider(twoHand, Candidate()); consider(mainHand, offWeapon); break;
+            case Hands::TwoHand:       consider(KIND_2H, KIND_NONE); break;
+            case Hands::Ranged:        consider(KIND_RANGED, KIND_NONE); break;
+            case Hands::OneHandShield: consider(KIND_1H_MAIN, KIND_SHIELD); break;
+            case Hands::DualWield:     consider(KIND_1H_MAIN, KIND_1H_OFF); break;
+            case Hands::Caster:        consider(KIND_2H, KIND_NONE); consider(KIND_1H_MAIN, KIND_HELD); break;
+            case Hands::CasterShield:  consider(KIND_2H, KIND_NONE); consider(KIND_1H_MAIN, KIND_SHIELD); break;
+            case Hands::DualOrTwoHand: consider(KIND_2H, KIND_NONE); consider(KIND_1H_MAIN, KIND_1H_OFF); break;
             case Hands::TitanGrip:
                 if (bot->CanTitanGrip())
-                    consider(twoHand, twoHand2.proto ? twoHand2 : Candidate());
-                consider(mainHand, offWeapon);
+                    consider(KIND_2H, KIND_2H);
+                consider(KIND_1H_MAIN, KIND_1H_OFF);
                 break;
         }
 
-        if (newMain.proto && newMain.score + newOff.score > wornScore(EQUIPMENT_SLOT_MAINHAND) + wornScore(EQUIPMENT_SLOT_OFFHAND))
+        Candidate newMain, newOff;
+        float const wornHands = wornScore(EQUIPMENT_SLOT_MAINHAND) + wornScore(EQUIPMENT_SLOT_OFFHAND);
+        if (mainKind != KIND_NONE)
+        {
+            newMain = pick(mainKind, 0.0f, nullptr);
+            if (offKind != KIND_NONE)
+                newOff = pick(offKind, 0.0f, newMain.proto);
+            // the random pair must still beat what the bot holds; else the best pair, if it does
+            if (newMain.score + newOff.score <= wornHands)
+            {
+                newMain = top(mainKind);
+                newOff = Candidate();
+                if (offKind != KIND_NONE)
+                {
+                    newOff = top(offKind);
+                    if (newOff.proto == newMain.proto)
+                        newOff = top(offKind, 1);
+                }
+            }
+        }
+
+        if (newMain.proto && newMain.score + newOff.score > wornHands)
         {
             bool const mainTwoHanded = newMain.proto->GetInventoryType() == INVTYPE_2HWEAPON ||
                 newMain.proto->GetInventoryType() == INVTYPE_RANGED || newMain.proto->GetInventoryType() == INVTYPE_RANGEDRIGHT;
@@ -469,5 +523,76 @@ namespace BotGear
         }
 
         return result;
+    }
+
+    namespace
+    {
+        // large bags tried in turn when Playerbots.AutoGear.BagEntry is 0 or not a bag on this server:
+        // Hexweave Bag (30), Royal Satchel (24), Embersilk Bag (22), Frostweave Bag (20)
+        uint32 const BagFallbacks[] = { 114821, 82446, 54443, 41599 };
+
+        uint32 BagToUse(uint32 configured)
+        {
+            auto isBag = [](uint32 entry)
+            {
+                ItemTemplate const* proto = entry ? sObjectMgr->GetItemTemplate(entry) : nullptr;
+                return proto && proto->GetClass() == ITEM_CLASS_CONTAINER && proto->GetInventoryType() == INVTYPE_BAG;
+            };
+            if (isBag(configured))
+                return configured;
+            for (uint32 entry : BagFallbacks)
+                if (isBag(entry))
+                    return entry;
+            return 0;
+        }
+    }
+
+    uint32 AddBags(Player* bot, uint32 bagEntry)
+    {
+        uint32 const entry = BagToUse(bagEntry);
+        if (!entry)
+        {
+            TC_LOG_ERROR("server.loading", "[mod-playerbots] Autogear: no bag item found (Playerbots.AutoGear.BagEntry = %u).", bagEntry);
+            return 0;
+        }
+
+        uint32 added = 0;
+        for (uint8 slot = INVENTORY_SLOT_BAG_START; slot < INVENTORY_SLOT_BAG_END; ++slot)
+        {
+            if (bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+                continue;
+            uint16 dest = 0;
+            if (bot->CanEquipNewItem(slot, dest, entry, false) != EQUIP_ERR_OK)
+                continue;
+            if (bot->EquipNewItem(dest, entry, true))
+                ++added;
+        }
+        return added;
+    }
+
+    uint32 ClearInventory(Player* bot)
+    {
+        uint32 destroyed = 0;
+        // what the bags hold
+        for (uint8 bag = INVENTORY_SLOT_BAG_START; bag < INVENTORY_SLOT_BAG_END; ++bag)
+            if (Bag* container = bot->GetBagByPos(bag))
+                for (uint32 slot = 0; slot < container->GetBagSize(); ++slot)
+                    if (container->GetItemByPos(uint8(slot)))
+                    {
+                        bot->DestroyItem(bag, uint8(slot), true);
+                        ++destroyed;
+                    }
+        // worn gear and the backpack (the bag slots, between them, are kept)
+        for (uint8 slot = EQUIPMENT_SLOT_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+        {
+            if (slot >= INVENTORY_SLOT_BAG_START && slot < INVENTORY_SLOT_BAG_END)
+                continue;
+            if (bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+            {
+                bot->DestroyItem(INVENTORY_SLOT_BAG_0, slot, true);
+                ++destroyed;
+            }
+        }
+        return destroyed;
     }
 }

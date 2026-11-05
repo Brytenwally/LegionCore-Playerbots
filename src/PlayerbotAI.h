@@ -58,6 +58,10 @@ public:
     // the fill was not needed any more (the queuer left the queue): leave the queue if still in it, alone
     // (not grouped yet); true when the bot is free again (no group), so the manager may release it
     bool AbandonLfg(Player* bot);
+    // Owner's rule (2026-11-05): a dismissed random bot (left its master's group, master gone, fill no longer
+    // needed) leaves its group, is reset (level, inventory except bags) and goes back to GM Island without a
+    // master; an alt bot logs out as before. On the bot's thread.
+    void Dismiss(Player* bot, char const* why);
 
     void Update(Player* bot, uint32 diff);
     // a whisper to the bot, from anywhere; only its owner is obeyed
@@ -146,6 +150,7 @@ private:
     float _jitterLeft = 0.0f;
     uint32 _jitterTimer = 0;
     bool _selfBot = false;
+    bool _dismissed = false;                                // waiting for the manager to give it a new AI
     uint32 _lfgTimer = 0;
     uint32 _answeredProposal = 0;
 

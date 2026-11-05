@@ -62,6 +62,8 @@ void PlayerbotMgr::LoadConfig()
     _gearOptions.minQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MinQuality", 0), 5);
     _gearOptions.maxQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxQuality", 4), 5);
     _gearOptions.maxItemLevel = sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxItemLevel", 0);
+    _gearOptions.choices = std::max(1, sConfigMgr->GetIntDefault("Playerbots.AutoGear.Choices", 5));
+    _gearOptions.bagEntry = sConfigMgr->GetIntDefault("Playerbots.AutoGear.BagEntry", 0);
     _gearOptions.belowSixtyAdd = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Below60Add", 6.0f);
     _gearOptions.factor60 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor60", 1.3f);
     _gearOptions.factor70 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor70", 2.0f);
@@ -163,18 +165,34 @@ bool PlayerbotMgr::RemoveBot(std::string name, std::string& error)
         return false;
     }
 
-    bot->removing = true;
-    bot->session->LogoutBot();
+    LogoutAndReset(*bot);
     return true;
+}
+
+// A random bot is reset first (level, inventory except bags) so it returns to the pool clean; then logged out.
+void PlayerbotMgr::LogoutAndReset(Bot& bot)
+{
+    bot.removing = true;
+    std::shared_ptr<WorldSession> session = bot.session;
+    Player* player = session->GetPlayer();
+    if (!bot.inWorld || !player || !IsBotAccountName(session->GetAccountName()))
+    {
+        session->LogoutBot();
+        return;
+    }
+    if (!ObjectAccessor::PostToPlayer(player->GetGUID(), [session](Player* p) -> void
+    {
+        BotFactory::ResetBot(p, false);
+        session->LogoutBot();
+    }))
+        session->LogoutBot();
 }
 
 void PlayerbotMgr::RemoveAllBots()
 {
     for (auto& pair : _bots)
-    {
-        pair.second.removing = true;
-        pair.second.session->LogoutBot();
-    }
+        if (!pair.second.removing)
+            LogoutAndReset(pair.second);
 }
 
 std::vector<PlayerbotMgr::BotInfo> PlayerbotMgr::ListBots() const
@@ -533,7 +551,7 @@ void PlayerbotMgr::Update(uint32 diff)
             else if (!player.second.IsEmpty() && bot.notifyGuid == player.second && bot.ownerGoneTimer < 0)
             {
                 bot.ownerGoneTimer = OwnerGoneLogoutDelay;
-                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s': its owner logged out, it logs out in %u s unless he returns.",
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s': its owner logged out: dismissed (random bot) or logged out (alt) in %u s unless he returns.",
                     bot.name.c_str(), OwnerGoneLogoutDelay / 1000);
             }
         }
@@ -552,6 +570,15 @@ void PlayerbotMgr::Update(uint32 diff)
         if (bot.ownerGoneTimer <= 0)
         {
             bot.ownerGoneTimer = -1;
+            // owner's rule: a random bot is dismissed (reset, back to GM Island) instead of logged out
+            if (IsBotAccountName(bot.session->GetAccountName()))
+            {
+                if (std::shared_ptr<PlayerbotAI> ai = GetAI(pair.first))
+                {
+                    ObjectAccessor::PostToPlayer(pair.first, [ai](Player* p) -> void { ai->Dismiss(p, "its owner did not come back"); });
+                    continue;
+                }
+            }
             bot.removing = true;
             bot.session->LogoutBot();
             TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out: its owner did not come back.", bot.name.c_str());
@@ -808,12 +835,7 @@ void PlayerbotMgr::ReleaseBot(ObjectGuid const& guid)
         std::lock_guard<std::mutex> lock(_aiLock);
         _ais[guid] = ai;
     }
-    ObjectAccessor::PostToPlayer(guid, [](Player* p) -> void
-    {
-        if (!p->GetGroup())
-            p->TeleportTo(1, 16222.1f, 16252.1f, 12.5872f, 1.35f);  // GM Island
-    });
-    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is free again (back to GM Island).", bot.name.c_str());
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is free again.", bot.name.c_str());
 }
 
 void PlayerbotMgr::UpdateLfgFill(uint32 diff)
@@ -853,10 +875,10 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
         std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(guid);
         if (!ai)
             return;
-        ObjectAccessor::PostToPlayer(guid, [ai, guid](Player* bot) -> void
+        ObjectAccessor::PostToPlayer(guid, [ai](Player* bot) -> void
         {
             if (ai->AbandonLfg(bot))
-                sPlayerbotMgr->RequestRelease(guid);
+                ai->Dismiss(bot, "its queuer left the queue");
         });
     };
 
