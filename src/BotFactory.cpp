@@ -606,8 +606,18 @@ namespace BotFactory
                 static std::set<uint32> logged;
                 std::lock_guard<std::mutex> lock(logLock);
                 if (logged.insert(spec * 10 + tier).second)
-                    TC_LOG_ERROR("server.loading", "[mod-playerbots] Talent build of spec %u: no talent '%s' in row %u, a random one is taken.",
-                        spec, name, uint32(tier + 1));
+                {
+                    // the names the row has on this core, to correct the build
+                    std::string present;
+                    for (uint8 column = 0; column < MAX_TALENT_COLUMNS; ++column)
+                        if (uint32 talentId = BotTalents::TalentAt(bot, tier, column))
+                            if (TalentEntry const* talent = sTalentStore.LookupEntry(talentId))
+                                if (SpellInfo const* spell = sSpellMgr->GetSpellInfo(talent->SpellID))
+                                    present += std::string(present.empty() ? "" : ", ") + (spell->SpellName ? spell->SpellName : "?") +
+                                        " (" + std::to_string(talentId) + ")";
+                    TC_LOG_ERROR("server.loading", "[mod-playerbots] Talent build of spec %u: no talent '%s' in row %u (it has: %s), a random one is taken.",
+                        spec, name, uint32(tier + 1), present.empty() ? "nothing" : present.c_str());
+                }
             }
 
             std::vector<uint32> choices;

@@ -159,7 +159,13 @@ private:
     float _jitterLeft = 0.0f;
     uint32 _jitterTimer = 0;
     bool _selfBot = false;
-    bool _dismissed = false;                                // waiting for the manager to give it a new AI
+    bool _dismissed = false;                                // leaving its group, then reset and released
+    bool _released = false;                                 // reset done, waiting for the manager's new AI
+    uint32 _dismissTimer = 0;
+    uint32 _dismissTries = 0;
+    std::string _dismissWhy;
+    void FinishDismiss(Player* bot, uint32 diff);
+    bool _groupInFight = false;                             // someone of the group on this map is fighting
     uint32 _lfgTimer = 0;
     uint32 _answeredProposal = 0;
     uint32 _lootTimer = 0;

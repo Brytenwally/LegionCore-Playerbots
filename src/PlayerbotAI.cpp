@@ -82,8 +82,14 @@ bool PlayerbotAI::IsMaster(ObjectGuid const& guid, uint32 accountId) const
 
 void PlayerbotAI::Update(Player* bot, uint32 diff)
 {
-    if (_dismissed || !bot->IsInWorld() || bot->IsBeingTeleported())
+    if (!bot->IsInWorld() || bot->IsBeingTeleported())
         return;
+
+    if (_dismissed)
+    {
+        FinishDismiss(bot, diff);
+        return;
+    }
 
     if (_selfBot)
     {
@@ -227,6 +233,15 @@ void PlayerbotAI::UpdateFollow(Player* bot)
     if (_engaged || _resting || !_healMoveGuid.IsEmpty() || bot->IsNonMeleeSpellCast(false))
         return;
 
+    // owner's rule (build #24): no following while the group fights (healers kept running after the player);
+    // combat moves the bot (chase, heal range) until the fight is over
+    if (_groupInFight)
+    {
+        if (!_followGuid.IsEmpty())
+            StopFollowing(bot);
+        return;
+    }
+
     Group* group = bot->GetGroup();
     if (_stay || !group || !bot->IsAlive())
     {
@@ -320,9 +335,11 @@ void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, Object
     if (!IsMaster(sender.guid, sender.accountId))
         return;
 
-    // the bot may have left that group since the message was sent
+    // the bot may have left that group since the message was sent; in a battleground the bot's group is the
+    // battleground raid while /party still reaches its original group (owner: every kind of group chat)
     Group* botGroup = bot->GetGroup();
-    if (!botGroup || botGroup->GetGUID() != group)
+    Group* original = bot->GetOriginalGroup();
+    if ((!botGroup || botGroup->GetGUID() != group) && (!original || original->GetGUID() != group))
         return;
 
     HandleOrder(bot, sender, text);
@@ -1160,6 +1177,9 @@ void PlayerbotAI::UpdateCombat(Player* bot)
     bool ordered = false;
     Unit* enemy = SelectTarget(bot, members, ordered);
 
+    // owner's rule (build #24): following is an out-of-combat tactic; while the group fights, nobody follows
+    _groupInFight = enemy != nullptr || std::any_of(members.begin(), members.end(), [](Player* m) { return m->isInCombat(); });
+
     // tanks (plan step 4.4): an enemy hitting someone else is theirs at once, no engage delay (it is
     // already in the fight); unless the owner tanks ("player tank") or the bot is passive
     Unit* loose = nullptr;
@@ -1994,14 +2014,47 @@ void PlayerbotAI::Dismiss(Player* bot, char const* why)
         return;
     }
 
+    // Out of the group first, and only then reset and teleported: the leave packet queued in the same tick as
+    // the far teleport to GM Island was handled while the bot was between maps and lost, so dismissed bots stayed
+    // in their group (owner's report, build #24: "x is already part of a group" when invited again).
     _dismissed = true;
+    _dismissWhy = why;
+    _dismissTimer = 0;
+    _dismissTries = 0;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' dismissed (%s): leaving its group, then reset and back to GM Island.",
+        bot->GetName(), why);
+    FinishDismiss(bot, 0);
+}
+
+void PlayerbotAI::FinishDismiss(Player* bot, uint32 diff)
+{
+    if (_released)
+        return;
+
     if (bot->GetGroup())
     {
-        WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
-        *packet << int8(0);
-        bot->GetSession()->QueuePacket(packet);
+        _dismissTimer += diff;
+        if (_dismissTries == 0 || _dismissTimer >= 3000)
+        {
+            if (_dismissTries >= 5)
+            {
+                TC_LOG_ERROR("server.loading", "[mod-playerbots] Bot '%s' could not leave its group; reset anyway.", bot->GetName());
+            }
+            else
+            {
+                WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
+                *packet << int8(0);
+                bot->GetSession()->QueuePacket(packet);
+                ++_dismissTries;
+                _dismissTimer = 0;
+                return;
+            }
+        }
+        else
+            return;
     }
-    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' dismissed (%s): reset and back to GM Island.", bot->GetName(), why);
+
+    _released = true;
     BotFactory::ResetBot(bot, true);
     sPlayerbotMgr->RequestRelease(bot->GetGUID());
 }

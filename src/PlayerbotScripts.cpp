@@ -15,6 +15,7 @@
 #include "BotRotations.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
+#include "World.h"
 #include "QuestDef.h"
 #include "WorldSession.h"
 
@@ -31,6 +32,10 @@ public:
     void OnStartup() override
     {
         BotRotations::Initialize();
+        // the core's single-player dungeon finder makes a lone player's group at once: no time for the fill
+        if (sPlayerbotMgr->IsEnabled() && sWorld->getBoolConfig(CONFIG_LFG_DEBUG_JOIN))
+            TC_LOG_WARN("server.loading", "[mod-playerbots] DungeonFinder.DebugJoin = 1 in worldserver.conf: a player alone is sent "
+                "to a dungeon at once, so bots cannot fill the queue. Set it to 0 for the dungeon finder fill.");
         TC_LOG_INFO("server.loading", "[mod-playerbots] Module loaded (%s). GM commands: .playerbots add/create/remove/removeall/list/self.",
             sPlayerbotMgr->IsEnabled() ? "enabled" : "disabled");
     }
@@ -96,7 +101,8 @@ public:
             case CHAT_MSG_PARTY_LEADER:
             case CHAT_MSG_RAID:
             case CHAT_MSG_RAID_LEADER:
-            case CHAT_MSG_INSTANCE_CHAT:
+            case CHAT_MSG_RAID_WARNING:
+            case CHAT_MSG_INSTANCE_CHAT:                    // also battleground chat on Legion
             case CHAT_MSG_INSTANCE_CHAT_LEADER:
                 break;
             default:

@@ -80,6 +80,11 @@ come first.
     thread: no master, new masterless AI). `_dismissed` stops the old AI until it is replaced. Alt bots keep
     the logout. `.playerbots remove` / `removeall` reset a random bot (no teleport) before logging it out
     (`PlayerbotMgr::LogoutAndReset`), so the stored character goes back to the pool clean.
+  - **Dismissed bots stayed in their group** (owner, build #24: "x is already part of a group" when invited
+    again): `Dismiss` queued `CMSG_LEAVE_GROUP` and teleported to GM Island in the same tick, so the packet was
+    handled while the bot was between maps and lost. Now `FinishDismiss` (each update while `_dismissed`)
+    re-queues the leave every 3 s (5 tries) and resets / teleports / releases only once `GetGroup()` is null.
+    **Rule: a queued client packet is not done yet; never follow it in the same tick with a far teleport.**
 - GM commands: `.playerbots add <name>`, `remove <name>`, `removeall`, `list`. Need
   `Playerbots.Enable = 1`. Any character of any account; must not be online.
 
@@ -406,6 +411,12 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   main + off...) is chosen by the best candidates, then a random main and off among that layout's top, or
   the best pair if the random pair does not beat what is held. Replaced pieces go to the bags (destroyed
   only at a new bot's initialization).
+- **Hand layout wins over raw score** (owner, build #24: a prot warrior / prot paladin / enhancement shaman
+  sometimes kept a two-hander, which out-scores one-hander + shield / two one-handers): `WornHandsFit(bot,
+  hands)`; a held layout the spec does not use (two-hander for OneHandShield / DualWield, one-hander for
+  TwoHand, melee for Ranged) counts as nothing held, in `AutoGear` (`wornHands` = 0) and `CompareToWorn`
+  (weapon slots' old = 0), so the spec's own weapons always replace it. "Sometimes": pool bots reused in
+  another spec kept their old two-hander.
 - **Owner's requests after that test (2026-11-05):**
   - A created bot **joins its creator's party**: 3 s after its setup, `PlayerbotAI::SendCreatorInvite`
     queues `CMSG_PARTY_INVITE` on the creator's session (`sWorld->FindSession(creatorAccount)`,
@@ -491,6 +502,12 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
   / healer -8.5), `shield` (tanks +3, others -3), `chaos` (near + random offset every 3 s), `far` (10 yd).
   `UpdateFollow` re-issues the follow when the anchor or the slot changes (> 0.3 yd / 0.15 rad). Order
   `formation [name]`; default `Playerbots.Formation.Default`.
+- **Follow is out of combat only** (owner, build #24: healers kept running after the player in fights):
+  `UpdateCombat` sets `_groupInFight` (an enemy, or a group member on the map in combat); `UpdateFollow` then
+  stops following and leaves the movement to combat (chase, heal range) until the fight is over.
+- **Group chat** (owner, build #24: "all kinds of group chat"): party, party leader, raid, raid leader, raid
+  warning, instance (= battleground on Legion) chat; the bot accepts the message's group when it is its group
+  or its original group (in a battleground `/p` names the original party, `GetGroup()` is the battleground's).
 - **Dungeon finder**, core commit "Add LFG accessors for modules" (LegionCore-Reforged): `LFGMgr::
   GetQueueIds(guid)` (PlayerDungeons), `GetRoleCheckRoles(gguid, guid, roles)` (a running role check,
   state INITIALITING), `GetPendingProposal(guid)` (a proposal waiting for his answer). This core keeps LFG
@@ -519,6 +536,10 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
   - A random bot in a dungeon finder group (`isLFGGroup`) does not leave it for lack of its master; when its
     master leaves that group it leaves too (queued `CMSG_LEAVE_GROUP`) and logs out 3 s later (the existing
     rule), so the group keeps no offline bot.
+  - **`DungeonFinder.DebugJoin = 1`** (the core's shipped `worldserver.conf.dist`, "allows using the Dungeon
+    Finder with a single player": `LFGQueue` minimum group size 1): a lone player is sent to the dungeon at
+    once, so the fill never gets its chance (owner, build #24: party bots queue correctly, pool bots never
+    did). Owner sets it to 0; the module logs a warning at startup while it is on.
   - Not yet: raids / scenarios / LFR, boot votes, bots with no group after a dungeon whose queuer was not in
     it (matched with others; they keep that master), refilling a running dungeon.
 - Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
@@ -581,6 +602,16 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   rotations comes later, the owner wants systems first. Startup: `Rotations: 36 specs, 169 spell
   names, 2 not found`: `demonic core` (Demonology's proc aura has another name on 7.3.5) and
   `wildfire bomb` (a Battle for Azeroth spell, not in 7.3.5: Survival's first step never fires).
+
+- 2026-11-05, owner's test of build #24 (core `23beaff` + `af7bf74`): **works**: autogear (head slot,
+  bags), formations, `.playerbots self`, party bots in the dungeon finder (role check, proposal), defensives /
+  potions / rest, tanks hold threat, healers heal (no damage when idle: expected), passive, startup pool (no
+  lag, no crash), reuse by `.playerbots create`, invites, starting zones. **Problems**: two-handers kept by
+  shield / dual-wield specs; dismissed bots stayed in their group; pool bots never filled the queue
+  (`DungeonFinder.DebugJoin = 1`); healers followed during fights; orders wanted from every group chat; a
+  shaman bot sometimes crashed the server on initialization (log ended with `Talent build of spec 263: no
+  talent 'Boulderfist' in row 1` and `initialized: Level 16 Enhancement Shaman`; crash dump asked for).
+  Loot rolls not tested (most Legion loot is personal). Fixes in the commit after.
 
 ## Checking
 

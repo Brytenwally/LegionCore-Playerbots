@@ -99,6 +99,41 @@ namespace BotGear
             }
         }
 
+        bool IsTwoHandType(InventoryType type)
+        {
+            return type == INVTYPE_2HWEAPON || type == INVTYPE_RANGED || type == INVTYPE_RANGEDRIGHT;
+        }
+
+        // Does what the bot holds fit its spec's layout? Owner's report (build #24): a prot warrior, prot paladin or
+        // enhancement shaman sometimes kept a two-hander because it out-scores a one-hander + shield / two
+        // one-handers by raw stats; those specs need their off hand. A layout that does not fit counts as nothing
+        // held, so the right weapons always replace it.
+        bool WornHandsFit(Player* bot, Hands hands)
+        {
+            Item* main = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND);
+            if (!main)
+                return true;
+            InventoryType const type = main->GetTemplate()->GetInventoryType();
+            bool const twoHand = IsTwoHandType(type);
+            bool const ranged = type == INVTYPE_RANGED || type == INVTYPE_RANGEDRIGHT;
+            switch (hands)
+            {
+                case Hands::OneHandShield:
+                case Hands::DualWield:
+                    return !twoHand;
+                case Hands::TwoHand:
+                    return twoHand && !ranged;
+                case Hands::Ranged:
+                    return ranged;
+                case Hands::TitanGrip:
+                case Hands::DualOrTwoHand:
+                case Hands::Caster:
+                case Hands::CasterShield:
+                    return !ranged;
+            }
+            return true;
+        }
+
         uint32 ArmorTypeFor(uint8 cls)
         {
             switch (cls)
@@ -473,7 +508,8 @@ namespace BotGear
         }
 
         Candidate newMain, newOff;
-        float const wornHands = wornScore(EQUIPMENT_SLOT_MAINHAND) + wornScore(EQUIPMENT_SLOT_OFFHAND);
+        float const wornHands = WornHandsFit(bot, hands) ?
+            wornScore(EQUIPMENT_SLOT_MAINHAND) + wornScore(EQUIPMENT_SLOT_OFFHAND) : 0.0f;
         if (mainKind != KIND_NONE)
         {
             newMain = pick(mainKind, 0.0f, nullptr);
@@ -639,6 +675,7 @@ namespace BotGear
         bool const mainTwoHanded = mainHand && isTwoHander(mainHand->GetTemplate()) && !titanGrip;
         Hands const hands = HandsFor(spec);
         bool const dual = hands == Hands::DualWield || hands == Hands::DualOrTwoHand || hands == Hands::TitanGrip;
+        bool const handsFit = WornHandsFit(bot, hands);
 
         // the weaker of two slots (an empty one first)
         auto weaker = [&](uint8 a, uint8 b) -> uint8 { return wornScore(b) < wornScore(a) ? b : a; };
@@ -711,6 +748,9 @@ namespace BotGear
 
         if (!result.twoHanded)
             old = wornScore(slot);
+        // a weapon layout the spec does not use (a prot warrior's two-hander) counts as nothing held
+        if (!handsFit && (slot == EQUIPMENT_SLOT_MAINHAND || slot == EQUIPMENT_SLOT_OFFHAND))
+            old = 0.0f;
         result.newScore = ItemScore(bot, proto, itemLevel);
         if (result.newScore <= 0.0f)
             return result;
