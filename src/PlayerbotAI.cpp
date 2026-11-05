@@ -9,6 +9,7 @@
 #include "Group.h"
 #include "Item.h"
 #include "LootMgr.h"
+#include "Creature.h"
 #include "World.h"
 #include "CellImpl.h"
 #include "Creature.h"
@@ -73,6 +74,27 @@ namespace
 PlayerbotAI::PlayerbotAI(ObjectGuid const& master, uint32 accountId, bool randomBot)
     : _master(master), _accountId(accountId), _formation(sPlayerbotMgr->GetDefaultFormation()), _randomBot(randomBot)
 {
+    auto fill = [](std::set<std::string>& set, std::string const& list)
+    {
+        std::string name;
+        for (char c : list + ",")
+        {
+            if (c == ',' || c == ' ')
+            {
+                if (!name.empty())
+                    set.insert(name);
+                name.clear();
+            }
+            else
+                name += char(std::tolower((unsigned char)c));
+        }
+    };
+    fill(_co, sPlayerbotMgr->GetDefaultCombatStrategies());
+    fill(_nc, sPlayerbotMgr->GetDefaultNonCombatStrategies());
+    // alt rule: looting changes a player's character (its bags), so alts loot only when ordered (nc +loot)
+    if (!_randomBot)
+        _nc.erase("loot");
+    ApplyFlags();
 }
 
 bool PlayerbotAI::IsMaster(ObjectGuid const& guid, uint32 accountId) const
@@ -128,7 +150,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     if (_talentTimer >= TalentCheckInterval)
     {
         _talentTimer = 0;
-        if (bot->IsAlive() && !bot->isInCombat())
+        if (_talentsOn && bot->IsAlive() && !bot->isInCombat())
             BotFactory::FillTalents(bot);
     }
 
@@ -145,6 +167,13 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         _lootTimer = 0;
         UpdateLootRolls(bot);
         UpdateBagEquip(bot);
+    }
+
+    _corpseTimer += diff;
+    if (_corpseTimer >= 500)
+    {
+        _corpseTimer = 0;
+        UpdateLoot(bot);
     }
 
     _combatTimer += diff;
@@ -230,7 +259,7 @@ void PlayerbotAI::UpdateFollow(Player* bot)
 {
     // combat owns the movement while engaged (or a healer walks to its heal target); moving would also
     // break a cast; a resting bot stays seated (UpdateRest stands it up when its leader walks off)
-    if (_engaged || _resting || !_healMoveGuid.IsEmpty() || bot->IsNonMeleeSpellCast(false))
+    if (_engaged || _resting || !_healMoveGuid.IsEmpty() || !_lootTarget.IsEmpty() || bot->IsNonMeleeSpellCast(false))
         return;
 
     // owner's rule (build #24): no following while the group fights (healers kept running after the player);
@@ -327,7 +356,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], player tank, bot tank, talents [spec], autogear, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -348,9 +377,15 @@ void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, Object
 bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::string const& text)
 {
     std::string const order = Lower(text);
+    if (order == "co" || order.rfind("co ", 0) == 0)
+        return StrategyOrder(bot, sender, true, order.size() > 2 ? order.substr(3) : std::string());
+    if (order == "nc" || order.rfind("nc ", 0) == 0)
+        return StrategyOrder(bot, sender, false, order.size() > 2 ? order.substr(3) : std::string());
+
     if (order == "follow")
     {
-        _stay = false;                                      // owner's rule: follow does not end a fight
+        _nc.insert("follow");
+        ApplyFlags();                                       // owner's rule: follow does not end a fight
         _followGuid.Clear();                                // follow again at the next check
         _followTimer = FollowCheckInterval;
         Say(bot, sender.guid, bot->GetGroup() ? "Following." : "Following once I am in your group.");
@@ -359,7 +394,8 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
 
     if (order == "stay")
     {
-        _stay = true;
+        _nc.erase("follow");
+        ApplyFlags();
         _healMoveGuid.Clear();
         _followGuid.Clear();
         bot->GetMotionMaster()->Clear();
@@ -393,14 +429,16 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
 
     if (order == "player tank")
     {
-        _playerTank = true;
+        _co.erase("tank");
+        ApplyFlags();
         Say(bot, sender.guid, BotRotations::RoleOf(bot) == BotRotations::CombatRole::Tank ?
             "You tank: I won't taunt, I fight with you." : "You tank (only matters to tank bots).");
         return true;
     }
     if (order == "bot tank")
     {
-        _playerTank = false;
+        _co.insert("tank");
+        ApplyFlags();
         Say(bot, sender.guid, BotRotations::RoleOf(bot) == BotRotations::CombatRole::Tank ?
             "I tank: I taunt whatever attacks the group." : "Bot tanks tank again.");
         return true;
@@ -486,7 +524,8 @@ void PlayerbotAI::Summon(Player* bot, OrderSender const& sender)
         return;
     }
 
-    _stay = false;                                          // a summoned bot follows again
+    _nc.insert("follow");                                   // a summoned bot follows again
+    ApplyFlags();
     _followGuid.Clear();
     bot->GetMotionMaster()->Clear();
     if (!bot->TeleportTo(sender.location))
@@ -510,7 +549,8 @@ void PlayerbotAI::LeaveGroup(Player* bot, OrderSender const& sender)
     *packet << int8(0);
     bot->GetSession()->QueuePacket(packet);
 
-    _stay = false;
+    _nc.insert("follow");
+    ApplyFlags();
     _leftByOrder = true;                                    // leaving by order keeps the bot online
     StopFollowing(bot);
     Say(bot, sender.guid, "Leaving the group.");
@@ -1339,7 +1379,27 @@ Unit* PlayerbotAI::SelectTarget(Player* bot, std::vector<Player*> const& members
 
     // self-defence, in every mode
     Unit* attacker = bot->getAttackerForHelper();
-    return usable(attacker) ? attacker : nullptr;
+    if (usable(attacker))
+        return attacker;
+
+    // co aggressive (owner's request): out of combat only, a new fight with a nearby enemy; in combat the bot
+    // helps with what already attacks the group (above) instead of pulling more
+    if (_aggressive)
+    {
+        bool fighting = bot->isInCombat();
+        for (Player* member : members)
+            if (member->isInCombat())
+                fighting = true;
+        if (!fighting)
+            if (Unit* pull = FindPullTarget(bot))
+            {
+                ordered = true;                             // no engage delay: the bot starts it
+                return pull;
+            }
+        if (fighting)
+            _pullTarget.Clear();
+    }
+    return nullptr;
 }
 
 void PlayerbotAI::Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role)
@@ -1605,17 +1665,15 @@ void PlayerbotAI::AttackOrder(Player* bot, OrderSender const& sender)
 bool PlayerbotAI::AssistOrder(Player* bot, OrderSender const& sender, std::string const& mode)
 {
     if (mode == "full")
-        _assist = AssistMode::Full;
-    else if (mode == "defend")
-        _assist = AssistMode::Defend;
-    else if (mode == "passive")
     {
-        // owner's rule: passive drops the fight at once, ordered target included
-        _assist = AssistMode::Passive;
-        _orderedTarget.Clear();
-        if (_engaged)
-            StopCombat(bot, "passive order");
+        _co.erase("passive");
+        _co.erase("defend");
+        ApplyFlags();
     }
+    else if (mode == "defend")
+        SetStrategy(bot, true, "defend", true);
+    else if (mode == "passive")
+        SetStrategy(bot, true, "passive", true);            // owner's rule: drops the fight at once
     else if (!mode.empty())
         return false;
 
@@ -1798,7 +1856,7 @@ bool PlayerbotAI::TrySurvival(Player* bot, Unit* enemy)
     PlayerbotMgr::SurvivalOptions const& options = sPlayerbotMgr->GetSurvivalOptions();
     float const health = bot->GetHealthPct();
 
-    if (options.defensives)
+    if (options.defensives && _defensivesOn)
     {
         uint32 const family = BotRotations::ClassFamily(bot->getClass());
         for (BotRotations::Defensive const* defensive : BotRotations::DefensivesFor(bot->getClass(), bot->GetSpecializationId()))
@@ -1821,7 +1879,7 @@ bool PlayerbotAI::TrySurvival(Player* bot, Unit* enemy)
     }
 
     // potions are the bot's own items: alts only when the conf allows it (owner's alt rule)
-    bool const mayUseItems = _randomBot || options.potionsOnAlts;
+    bool const mayUseItems = _potionsOn && (_randomBot || options.potionsOnAlts);
     if (mayUseItems && health <= options.potionHealthPct && BotConsumables::UsePotion(bot, false))
     {
         if (sPlayerbotMgr->GetCombatLog() >= 1)
@@ -1879,7 +1937,7 @@ void PlayerbotAI::UpdateRest(Player* bot, std::vector<Player*> const& members, U
         return;
     }
 
-    if (!options.rest || groupFighting || leaderAway || !bot->IsAlive() || bot->IsNonMeleeSpellCast(false) || _engaged)
+    if (!options.rest || !_restOn || groupFighting || leaderAway || !bot->IsAlive() || bot->IsNonMeleeSpellCast(false) || _engaged)
         return;
     bool const needHealth = health < options.restHealthPct;
     bool const needMana = usesMana && mana < options.restManaPct;
@@ -2072,8 +2130,8 @@ void PlayerbotAI::UpdateLootRolls(Player* bot)
     {
         ItemTemplate const* proto = sObjectMgr->GetItemTemplate(roll.itemId);
         uint8 choice = ROLL_PASS;
-        char const* why = "random bots do not roll (Playerbots.Loot.RandomBotsRoll)";
-        if (!_randomBot || options.randomBotsRoll)
+        char const* why = _rollOn ? "random bots do not roll (Playerbots.Loot.RandomBotsRoll)" : "roll strategy off (nc -roll)";
+        if (_rollOn && (!_randomBot || options.randomBotsRoll))
         {
             why = "not an upgrade for my spec";
             if (proto && (roll.rollVoteMask & ROLL_FLAG_TYPE_NEED))
@@ -2101,7 +2159,7 @@ void PlayerbotAI::UpdateLootRolls(Player* bot)
 void PlayerbotAI::UpdateBagEquip(Player* bot)
 {
     PlayerbotMgr::LootOptions const& options = sPlayerbotMgr->GetLootOptions();
-    if (!options.autoEquip || (!_randomBot && !options.autoEquipAlts) || !bot->IsAlive())
+    if (!options.autoEquip || !_autoEquipOn || (!_randomBot && !options.autoEquipAlts) || !bot->IsAlive())
         return;
 
     // the bag contents (items and where they are): a change means something was gained (loot, quest, mail,
@@ -2180,4 +2238,371 @@ bool PlayerbotAI::EquipFromBag(Player* bot, Item* item, BotGear::Comparison cons
     if (!_master.IsEmpty())
         Say(bot, _master, "Equipped " + name + " (+" + std::to_string(int32(comparison.gain * 100.0f + 0.5f)) + "% for my spec).");
     return true;
+}
+
+// ---- Strategies (co / nc), aggressive pulls, looting --------------------------------------------------------
+
+namespace
+{
+    struct StrategyInfo
+    {
+        char const* name;
+        char const* what;
+    };
+    StrategyInfo const CombatStrategies[] =
+    {
+        { "aggressive", "start fights with nearby enemies when out of combat" },
+        { "passive", "fight nothing, not even what attacks me" },
+        { "defend", "fight only what attacks you or me" },
+        { "tank", "tank bots taunt and take enemies off the group" },
+        { "defensives", "use defensive cooldowns when hurt" },
+        { "potions", "drink potions from my bags when low" },
+    };
+    StrategyInfo const NonCombatStrategies[] =
+    {
+        { "follow", "follow the group's leader (off = stay)" },
+        { "loot", "loot the corpses of our kills" },
+        { "rest", "eat and drink when low" },
+        { "roll", "roll need / greed on group loot (off = pass)" },
+        { "autoequip", "put on upgrades from my bags" },
+        { "talents", "fill empty talent rows" },
+    };
+    // only one of these at a time
+    bool IsAssistStrategy(std::string const& name)
+    {
+        return name == "aggressive" || name == "passive" || name == "defend";
+    }
+}
+
+void PlayerbotAI::ApplyFlags()
+{
+    _assist = _co.count("passive") ? AssistMode::Passive : _co.count("defend") ? AssistMode::Defend : AssistMode::Full;
+    _aggressive = _co.count("aggressive") != 0;
+    _playerTank = !_co.count("tank");
+    _defensivesOn = _co.count("defensives") != 0;
+    _potionsOn = _co.count("potions") != 0;
+    _stay = !_nc.count("follow");
+    _lootCorpses = _nc.count("loot") != 0;
+    _restOn = _nc.count("rest") != 0;
+    _rollOn = _nc.count("roll") != 0;
+    _autoEquipOn = _nc.count("autoequip") != 0;
+    _talentsOn = _nc.count("talents") != 0;
+}
+
+void PlayerbotAI::SetStrategy(Player* bot, bool combat, std::string const& name, bool on)
+{
+    std::set<std::string>& set = combat ? _co : _nc;
+    if (on)
+    {
+        if (combat && IsAssistStrategy(name))
+        {
+            _co.erase("aggressive");
+            _co.erase("passive");
+            _co.erase("defend");
+        }
+        set.insert(name);
+    }
+    else
+        set.erase(name);
+    ApplyFlags();
+
+    // what a change does at once
+    if (combat && name == "passive" && on)
+    {
+        _orderedTarget.Clear();
+        _pullTarget.Clear();
+        if (_engaged)
+            StopCombat(bot, "passive");
+    }
+    if (combat && name == "aggressive" && !on)
+        _pullTarget.Clear();
+    if (!combat && name == "follow")
+    {
+        _followGuid.Clear();
+        _followTimer = FollowCheckInterval;
+        if (!on)
+        {
+            _healMoveGuid.Clear();
+            bot->GetMotionMaster()->Clear();
+            bot->GetMotionMaster()->MoveIdle();
+        }
+    }
+    if (!combat && name == "loot" && !on)
+        _lootTarget.Clear();
+}
+
+// "co ?" / "nc ?": the bot's strategies; "co +a,-b" (or "co + a", "co -b") adds / removes
+bool PlayerbotAI::StrategyOrder(Player* bot, OrderSender const& sender, bool combat, std::string const& args)
+{
+    std::set<std::string>& set = combat ? _co : _nc;
+    char const* kind = combat ? "Combat" : "Non-combat";
+    auto known = [combat](std::string const& name) -> bool
+    {
+        if (combat)
+        {
+            for (StrategyInfo const& info : CombatStrategies)
+                if (name == info.name)
+                    return true;
+        }
+        else
+            for (StrategyInfo const& info : NonCombatStrategies)
+                if (name == info.name)
+                    return true;
+        return false;
+    };
+    auto list = [&]() -> std::string
+    {
+        std::string text = std::string(kind) + " strategies:";
+        if (set.empty())
+            text += " none";
+        bool first = true;
+        for (std::string const& name : set)
+        {
+            text += (first ? " " : ", ") + name;
+            first = false;
+        }
+        text += ". Available:";
+        first = true;
+        if (combat)
+        {
+            for (StrategyInfo const& info : CombatStrategies)
+            {
+                text += std::string(first ? " " : ", ") + info.name + " (" + info.what + ")";
+                first = false;
+            }
+        }
+        else
+            for (StrategyInfo const& info : NonCombatStrategies)
+            {
+                text += std::string(first ? " " : ", ") + info.name + " (" + info.what + ")";
+                first = false;
+            }
+        return text + ".";
+    };
+
+    std::string rest = args;
+    while (!rest.empty() && rest.front() == ' ')
+        rest.erase(rest.begin());
+    if (rest.empty() || rest == "?")
+    {
+        Say(bot, sender.guid, list());
+        return true;
+    }
+
+    // tokens: +name / -name, separated by commas or spaces; a lone sign applies to the next name
+    std::vector<std::string> changed, unknown;
+    char sign = 0;
+    std::string token;
+    auto flush = [&]()
+    {
+        if (token.empty())
+            return;
+        if (token[0] == '+' || token[0] == '-')
+        {
+            sign = token[0];
+            token.erase(token.begin());
+        }
+        if (!token.empty())
+        {
+            if (!sign || !known(token))
+                unknown.push_back(token);
+            else
+            {
+                SetStrategy(bot, combat, token, sign == '+');
+                changed.push_back(std::string(1, sign) + token);
+            }
+            sign = 0;
+        }
+        token.clear();
+    };
+    for (char c : rest + ",")
+    {
+        if (c == ',' || c == ' ')
+            flush();
+        else
+            token += c;
+    }
+
+    std::string text;
+    if (!changed.empty())
+    {
+        text = std::string(kind) + " strategies changed (";
+        for (size_t i = 0; i < changed.size(); ++i)
+            text += (i ? ", " : "") + changed[i];
+        text += "). ";
+    }
+    if (!unknown.empty())
+    {
+        text += "Unknown: ";
+        for (size_t i = 0; i < unknown.size(); ++i)
+            text += (i ? ", " : "") + unknown[i];
+        text += " (use +name or -name). ";
+    }
+    Say(bot, sender.guid, text + list());
+    return true;
+}
+
+Unit* PlayerbotAI::FindPullTarget(Player* bot)
+{
+    if (!_lootTarget.IsEmpty() || _resting || !bot->IsAlive())
+        return nullptr;
+
+    // no new fight while it should rest (it would only stand up again)
+    PlayerbotMgr::SurvivalOptions const& survival = sPlayerbotMgr->GetSurvivalOptions();
+    if (_restOn && survival.rest && (bot->GetHealthPct() < survival.restHealthPct ||
+        (bot->GetMaxPower(POWER_MANA) > 0 && bot->GetPowerPct(POWER_MANA) < survival.restManaPct)))
+        return nullptr;
+
+    PlayerbotMgr::StrategyOptions const& options = sPlayerbotMgr->GetStrategyOptions();
+    auto pullable = [bot, &options](Creature* creature) -> bool
+    {
+        return creature && creature->IsInWorld() && creature->IsAlive() && !creature->IsInEvadeMode() &&
+            creature->getLevel() <= bot->getLevel() + options.aggressiveLevelsAbove &&
+            creature->GetCreatureType() != CREATURE_TYPE_CRITTER && !creature->isCivilian() && !creature->isTotem() &&
+            !creature->GetOwnerGUID().IsPlayer() && bot->IsHostileTo(creature) && bot->IsValidAttackTarget(creature) &&
+            (!creature->hasLootRecipient() || creature->isTappedBy(bot)) &&
+            bot->GetDistance(creature) <= options.aggressiveRange && bot->IsWithinLOSInMap(creature);
+    };
+
+    if (!_pullTarget.IsEmpty())
+    {
+        Creature* kept = ObjectAccessor::GetCreature(*bot, _pullTarget);
+        if (pullable(kept))
+            return kept;
+        _pullTarget.Clear();
+    }
+
+    std::list<Creature*> creatures;
+    bot->GetCreatureListInGrid(creatures, options.aggressiveRange);
+    Creature* nearest = nullptr;
+    for (Creature* creature : creatures)
+        if (pullable(creature) && (!nearest || bot->GetDistance(creature) < bot->GetDistance(nearest)))
+            nearest = creature;
+    if (!nearest)
+        return nullptr;
+
+    _pullTarget = nearest->GetGUID();
+    if (sPlayerbotMgr->GetCombatLog() >= 1)
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' (aggressive) pulls %s (level %u).", bot->GetName(), nearest->GetName(),
+            uint32(nearest->getLevel()));
+    return nearest;
+}
+
+void PlayerbotAI::UpdateLoot(Player* bot)
+{
+    if (!_lootCorpses || _selfBot || !bot->IsAlive() || bot->isInCombat() || _groupInFight || _engaged || _resting ||
+        bot->IsNonMeleeSpellCast(false))
+    {
+        if (!_lootTarget.IsEmpty() && (!_lootCorpses || _groupInFight || bot->isInCombat()))
+            _lootTarget.Clear();
+        return;
+    }
+
+    float const LootReach = 4.0f;
+    uint32 const LootTimeout = 15000;
+
+    if (!_lootTarget.IsEmpty())
+    {
+        Creature* corpse = ObjectAccessor::GetCreature(*bot, _lootTarget);
+        if (!corpse || corpse->IsAlive() || getMSTimeDiff(_lootStarted, getMSTime()) > LootTimeout)
+        {
+            _lootedCorpses.insert(_lootTarget);
+            _lootTarget.Clear();
+            _followGuid.Clear();                            // follow again
+            return;
+        }
+        if (bot->GetDistance(corpse) > LootReach)
+        {
+            if (bot->GetMotionMaster()->GetCurrentMovementGeneratorType() != POINT_MOTION_TYPE)
+            {
+                float x, y, z;
+                corpse->GetPosition(x, y, z);
+                bot->GetMotionMaster()->Clear();
+                bot->GetMotionMaster()->MovePoint(0, x, y, z);
+            }
+            return;
+        }
+
+        bot->StopMoving();
+        LootCorpse(bot, corpse);
+        _lootedCorpses.insert(_lootTarget);
+        _lootTarget.Clear();
+        _followGuid.Clear();
+        return;
+    }
+
+    // a corpse of a kill the bot or its group may loot, not tried yet, the nearest first
+    if (_lootedCorpses.size() > 300)
+        _lootedCorpses.clear();
+    std::list<Creature*> corpses;
+    bot->GetCorpseCreatureInGrid(corpses, sPlayerbotMgr->GetStrategyOptions().lootRange);
+    Creature* nearest = nullptr;
+    for (Creature* corpse : corpses)
+    {
+        if (!corpse || corpse->IsAlive() || _lootedCorpses.count(corpse->GetGUID()))
+            continue;
+        if (!corpse->isTappedBy(bot) && !corpse->HasInLootList(bot->GetGUID()))
+            continue;
+        if (!nearest || bot->GetDistance(corpse) < bot->GetDistance(nearest))
+            nearest = corpse;
+    }
+    if (!nearest)
+        return;
+
+    _lootTarget = nearest->GetGUID();
+    _lootStarted = getMSTime();
+    StopFollowing(bot);
+}
+
+// As the client: CMSG_LOOT_UNIT (WorldSession::LootCorps, which fills the corpse's loot and the bot's personal
+// loot of it), then each item it may take (CMSG_LOOT_ITEM: StoreLootItem by slot, the rolled slots of group loot
+// skipped), the gold (CMSG_LOOT_MONEY: GetGoldFromLoot) and CMSG_LOOT_RELEASE (DoLootRelease). All on the bot's own
+// thread, in one go, as the handlers would.
+void PlayerbotAI::LootCorpse(Player* bot, Creature* corpse)
+{
+    ObjectGuid const guid = corpse->GetGUID();
+    WorldSession* session = bot->GetSession();
+    session->LootCorps(guid);
+
+    uint32 const minQuality = sPlayerbotMgr->GetStrategyOptions().lootMinQuality;
+    std::vector<Loot*> loots;
+    loots.push_back(&corpse->loot);
+    {
+        auto itr = bot->personalLoot.find(guid);
+        if (itr != bot->personalLoot.end())
+            loots.push_back(&itr->second);
+    }
+
+    uint32 taken = 0, left = 0;
+    Group* group = bot->GetGroup();
+    for (Loot* loot : loots)
+    {
+        uint32 const slots = loot->GetMaxSlotInLootFor(bot);
+        for (uint32 slot = 0; slot < slots; ++slot)
+        {
+            QuestItem* questItem = nullptr;
+            QuestItem* ffaItem = nullptr;
+            QuestItem* condItem = nullptr;
+            QuestItem* currency = nullptr;
+            LootItem* item = loot->LootItemInSlot(slot, bot, &questItem, &ffaItem, &condItem, &currency);
+            if (!item || item->is_looted || item->is_blocked)
+                continue;
+            if (group && !loot->personal && group->isRolledSlot(uint8(slot)))
+                continue;                                   // being rolled for: the roll decides
+            // quest items and currencies always; other items from the configured quality up
+            bool const always = questItem || item->needs_quest || item->currency || currency;
+            if (!always && uint32(item->quality) < minQuality)
+            {
+                ++left;
+                continue;
+            }
+            bot->StoreLootItem(uint8(slot), loot);
+            ++taken;
+        }
+    }
+    bot->GetGoldFromLoot();
+    session->DoLootRelease(bot->GetLootGUID().IsEmpty() ? guid : bot->GetLootGUID());
+
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' loots %s: %u item(s) taken, %u below the minimum quality left.",
+        bot->GetName(), corpse->GetName(), taken, left);
 }

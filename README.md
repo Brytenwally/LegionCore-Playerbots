@@ -57,6 +57,13 @@ When you log out, the bots of your account (your alts) log out with you.
   nothing, not even what attacks the bot, until `attack` or `assist full|defend`), `assist
   full|defend|passive`; `follow` does not end a fight. A dead
   bot is revived by `summon` in party chat (`Playerbots.Summon.Revive`).
+- **Strategies**: `co ?` / `nc ?` list a bot's combat / non-combat strategies; `co +aggressive`,
+  `co -tank`, `nc +loot,-rest` change them (whisper or any group chat). Combat: `aggressive` (starts
+  fights with nearby enemies up to 6 levels above it, only out of combat; in combat it helps with
+  what already attacks the group), `passive`, `defend`, `tank`, `defensives`, `potions`. Non-combat:
+  `follow`, `loot` (loots our kills after the fight; `Playerbots.Loot.MinQuality`), `rest`, `roll`,
+  `autoequip`, `talents`. The older orders (`follow`, `stay`, `passive`, `assist ...`, `player tank`,
+  `bot tank`) switch the same strategies. Defaults in `Playerbots.Strategies.*`.
 - **Formations**: `formation` shows the current one, `formation <name>` sets it: `role` (default:
   tank ahead at your side, melee rear left, ranged rear right, healer behind), `near`, `line`,
   `queue`, `circle`, `arrow`, `shield`, `chaos`, `far` (`Playerbots.Formation.Default`).

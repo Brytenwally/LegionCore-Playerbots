@@ -272,3 +272,44 @@ Playerbots.Loot.NeedUpgradePct = 5
 Playerbots.AutoEquip.Enable = 1
 Playerbots.AutoEquip.Alts = 0
 Playerbots.AutoEquip.UpgradePct = 5
+
+###################################################################################################
+# STRATEGIES (co = combat, nc = non-combat; "co ?", "co +name,-name", "nc ?", "nc +name" orders)
+###################################################################################################
+
+#
+#    Playerbots.Strategies.Combat
+#    Playerbots.Strategies.NonCombat
+#        The strategies every bot starts with, comma separated.
+#        Combat:     aggressive (start fights with nearby enemies out of combat), passive (fight
+#                    nothing), defend (only what attacks the master or the bot), tank (tank bots
+#                    taunt), defensives, potions. aggressive / passive / defend exclude each other.
+#        Non-combat: follow (off = stay), loot (loot our kills' corpses; alt bots only by order),
+#                    rest (eat and drink), roll (need / greed on group loot; off = pass),
+#                    autoequip (bag upgrades), talents (fill empty talent rows).
+#        Default: "tank,defensives,potions", "follow,loot,rest,roll,autoequip,talents"
+
+Playerbots.Strategies.Combat = "tank,defensives,potions"
+Playerbots.Strategies.NonCombat = "follow,loot,rest,roll,autoequip,talents"
+
+#
+#    Playerbots.Aggressive.Range
+#    Playerbots.Aggressive.MaxLevelAbove
+#        co aggressive: out of combat, the bot attacks the nearest hostile creature within Range
+#        yards (in sight, not tapped by others, no critters or civilians) at most MaxLevelAbove
+#        levels above it. In combat it only helps with what already attacks the group.
+#        Default: 25, 6
+
+Playerbots.Aggressive.Range = 25
+Playerbots.Aggressive.MaxLevelAbove = 6
+
+#
+#    Playerbots.Loot.MinQuality
+#    Playerbots.Loot.Range
+#        nc loot: out of combat the bot walks to corpses within Range yards that it or its group
+#        may loot, takes the gold, quest items, currencies, and items of at least MinQuality:
+#        0 = all (poor and up), 1 = common, 2 = uncommon, 3 = rare, 4 = epic.
+#        Default: 0, 30
+
+Playerbots.Loot.MinQuality = 0
+Playerbots.Loot.Range = 30

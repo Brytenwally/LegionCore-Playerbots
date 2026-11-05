@@ -20,10 +20,13 @@
 #include "BotFormation.h"
 #include "LFG.h"
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
+class Creature;
 class Item;
+class Unit;
 class Player;
 class Quest;
 class WorldObject;
@@ -49,7 +52,7 @@ public:
 
     // ".playerbots self": the AI runs a client's own character (master = himself). No invites, no logout rules,
     // no automatic talents or rest; his own target is fought as an ordered one. Set before the AI is shared.
-    void SetSelfBot() { _selfBot = true; }
+    void SetSelfBot() { _selfBot = true; _nc.erase("loot"); ApplyFlags(); }
     bool IsSelfBot() const { return _selfBot; }
     // the self-bot is switched off: give the movement and the fight back to the player (his thread)
     void Detach(Player* bot);
@@ -136,6 +139,35 @@ private:
     void UpdateBagEquip(Player* bot);
     bool EquipFromBag(Player* bot, Item* item, BotGear::Comparison const& comparison);
     bool FormationOrder(Player* bot, OrderSender const& sender, std::string const& args);
+
+    // Strategies (owner's request, as mod-playerbots' co / nc): named switches in two sets, combat and
+    // non-combat; "co ?" / "nc ?" lists them, "co +name,-name" / "nc +name" changes them. The older orders
+    // (follow, stay, passive, assist, player tank, bot tank) change the same sets. ApplyFlags caches them.
+    std::set<std::string> _co;
+    std::set<std::string> _nc;
+    void ApplyFlags();
+    bool StrategyOrder(Player* bot, OrderSender const& sender, bool combat, std::string const& args);
+    void SetStrategy(Player* bot, bool combat, std::string const& name, bool on);
+    bool _aggressive = false;                               // co aggressive: picks fights out of combat
+    bool _lootCorpses = false;                              // nc loot
+    bool _restOn = true;                                    // nc rest
+    bool _defensivesOn = true;                              // co defensives
+    bool _potionsOn = true;                                 // co potions
+    bool _rollOn = true;                                    // nc roll
+    bool _autoEquipOn = true;                               // nc autoequip
+    bool _talentsOn = true;                                 // nc talents
+
+    // co aggressive: the nearest hostile creature in reach, at most Playerbots.Aggressive.MaxLevelAbove above
+    // the bot, nobody else's; kept until the fight starts
+    Unit* FindPullTarget(Player* bot);
+    ObjectGuid _pullTarget;
+    // nc loot: walks to a corpse it or its group may loot, out of combat, and loots it as a client would
+    void UpdateLoot(Player* bot);
+    void LootCorpse(Player* bot, Creature* corpse);
+    ObjectGuid _lootTarget;
+    uint32 _lootStarted = 0;
+    uint32 _corpseTimer = 0;
+    std::set<ObjectGuid> _lootedCorpses;
     void StopFollowing(Player* bot);
     void Say(Player* bot, ObjectGuid const& to, std::string const& text);
     // the reward the bot takes: the best usable item among the quest's choices and its class/spec

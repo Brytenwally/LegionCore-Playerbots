@@ -40,6 +40,12 @@ void PlayerbotMgr::LoadConfig()
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
     _selfGMOnly = sConfigMgr->GetBoolDefault("Playerbots.Self.GMOnly", true);
     _loot.randomBotsRoll = sConfigMgr->GetBoolDefault("Playerbots.Loot.RandomBotsRoll", true);
+    _defaultCo = sConfigMgr->GetStringDefault("Playerbots.Strategies.Combat", "tank,defensives,potions");
+    _defaultNc = sConfigMgr->GetStringDefault("Playerbots.Strategies.NonCombat", "follow,loot,rest,roll,autoequip,talents");
+    _strategy.lootMinQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.Loot.MinQuality", 0), 7);
+    _strategy.lootRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Loot.Range", 30.0f));
+    _strategy.aggressiveRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Aggressive.Range", 25.0f));
+    _strategy.aggressiveLevelsAbove = sConfigMgr->GetIntDefault("Playerbots.Aggressive.MaxLevelAbove", 6);
     _loot.needUpgradePct = sConfigMgr->GetFloatDefault("Playerbots.Loot.NeedUpgradePct", 5.0f);
     _loot.autoEquip = sConfigMgr->GetBoolDefault("Playerbots.AutoEquip.Enable", true);
     _loot.autoEquipAlts = sConfigMgr->GetBoolDefault("Playerbots.AutoEquip.Alts", false);

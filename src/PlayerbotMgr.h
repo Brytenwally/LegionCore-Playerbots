@@ -72,6 +72,18 @@ public:
     };
     LootOptions const& GetLootOptions() const { return _loot; }
 
+    // strategies every bot starts with (Playerbots.Strategies.*), and the loot / aggressive settings
+    std::string const& GetDefaultCombatStrategies() const { return _defaultCo; }
+    std::string const& GetDefaultNonCombatStrategies() const { return _defaultNc; }
+    struct StrategyOptions
+    {
+        uint32 lootMinQuality = 0;      // items below this quality stay on the corpse (quest items always taken)
+        float lootRange = 30.0f;
+        float aggressiveRange = 25.0f;
+        uint32 aggressiveLevelsAbove = 6;
+    };
+    StrategyOptions const& GetStrategyOptions() const { return _strategy; }
+
     // ".playerbots self" (player's thread): turns the AI on or off for his own character; reply = what to tell him
     bool ToggleSelfBot(Player* player, std::string& reply);
     bool IsSelfGMOnly() const { return _selfGMOnly; }
@@ -213,6 +225,9 @@ private:
     uint32 _engageDelay = 1200;
     SurvivalOptions _survival;
     LootOptions _loot;
+    std::string _defaultCo = "tank,defensives,potions";
+    std::string _defaultNc = "follow,loot,rest,roll,autoequip,talents";
+    StrategyOptions _strategy;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

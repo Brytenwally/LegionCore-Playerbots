@@ -544,6 +544,33 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     it (matched with others; they keep that master), refilling a running dungeon.
 - Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
 
+## Strategies, aggressive, loot (2026-11-05, untested)
+
+Owner's request: mod-playerbots' `co` / `nc` split. Each bot has two sets of names (`PlayerbotAI::_co`, `_nc`),
+filled from `Playerbots.Strategies.Combat` / `NonCombat`; `ApplyFlags` caches them into the flags the code
+reads (`_assist`, `_playerTank`, `_stay`, `_aggressive`, `_lootCorpses`, `_restOn`, ...), so the older orders
+(`follow`, `stay`, `passive`, `assist full|defend|passive`, `player tank`, `bot tank`, `summon`, `leave`) just
+edit the sets. Orders `co ?` / `nc ?` (list, with what each does), `co +a,-b` / `co + a` / `nc -follow`
+(`StrategyOrder`; tokens split by commas and spaces, a lone sign applies to the next name; unknown names are
+reported), in whispers and every group chat (`HandleOrder`). Combat: `aggressive`, `passive`, `defend` (only
+one of these three at a time), `tank`, `defensives`, `potions`. Non-combat: `follow`, `loot`, `rest`, `roll`
+(off = pass), `autoequip`, `talents`. Config gates still apply on top (potions / auto-equip on alts).
+- **aggressive** (`FindPullTarget`, in `SelectTarget` after self-defence): only when neither the bot nor a
+  group member on the map is in combat; the nearest creature within `Playerbots.Aggressive.Range` (25), at
+  most `MaxLevelAbove` (6) levels above the bot, hostile, valid target, in sight, not evading, no critter /
+  civilian / totem / player's pet, not tapped by others; kept (`_pullTarget`) until the fight starts, fought
+  as an ordered target (no engage delay). In combat the usual assist rules help with what already attacks
+  the group. No pull while looting, resting or below the rest thresholds.
+- **loot** (`UpdateLoot` every 500 ms; not self-bots; **alts only by order**, the default set drops `loot`
+  for non-random bots: their bags are the player's): out of combat and with no group fight, the nearest
+  corpse (`GetCorpseCreatureInGrid`, `Playerbots.Loot.Range` 30) tapped by the bot's group or listing the bot
+  (`isTappedBy` / `HasInLootList`), not tried yet (`_lootedCorpses`); `MovePoint` to it, 15 s timeout;
+  within 4 yd `LootCorpse`: as the client's loot window, on the bot's thread: `WorldSession::LootCorps`
+  (CMSG_LOOT_UNIT: fills the corpse's loot and the bot's `personalLoot[corpse]`), for each slot of both loots
+  `LootItemInSlot` (what the bot may take), rolled slots of group loot skipped (`isRolledSlot`, as the
+  handler), quest items / currencies always, other items from `Playerbots.Loot.MinQuality` (0 = all), then
+  `StoreLootItem(slot, loot)`, `GetGoldFromLoot`, `DoLootRelease`. Follow waits while `_lootTarget` is set.
+
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
 Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.
