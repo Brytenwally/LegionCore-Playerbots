@@ -43,6 +43,19 @@ public:
     float GetEngageRange() const { return _engageRange; }
     uint32 GetEngageDelay() const { return _engageDelay; }
 
+    // plan step 4.5
+    struct SurvivalOptions
+    {
+        bool defensives = true;
+        float potionHealthPct = 30.0f;
+        float potionManaPct = 20.0f;
+        bool potionsOnAlts = false;     // potions are the player's items: off for alts unless set
+        bool rest = true;
+        float restHealthPct = 60.0f;
+        float restManaPct = 50.0f;
+    };
+    SurvivalOptions const& GetSurvivalOptions() const { return _survival; }
+
     // Starts logging the character in as a bot. notifyGuid (may be empty) gets "Bot 'X' logged in."
     // when the character is in the world, or the reason it failed.
     bool AddBot(std::string name, ObjectGuid const& notifyGuid, std::string& error);
@@ -127,6 +140,7 @@ private:
     uint32 _combatLog = 1;
     float _engageRange = 30.0f;
     uint32 _engageDelay = 1200;
+    SurvivalOptions _survival;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

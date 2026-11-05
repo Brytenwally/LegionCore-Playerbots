@@ -285,7 +285,31 @@ server** (see Status, 2026-11-05).
   Marrowrend below 5 Bone Shield stacks, Death Strike at 45 runic power, Heart Strike). New step
   target `Self` (only while fighting) and condition `AuraStacksBelowOnSelf` (`AuraStacksNamed`).
   Interrupts per spec were already in the table.
-- Not yet: tank threat bonus (owner: no), defensives/potions (4.5), ground-effect dodge
+- **Survival (plan step 4.5, 2026-11-05, untested):**
+  - **Defensives** (`BotRotations::Defensives`, `DefensivesFor(class, spec)`; names in the startup
+    name index): in combat, before the rotation, the first defensive whose `belowPct` the bot's
+    health has reached, whose spell it knows and whose aura it does not already have (self ones);
+    log `Bot 'X' uses <spell> at N% health.` Per class: Warrior Die by the Sword / Enraged
+    Regeneration / Shield Wall + Last Stand; Paladin Divine Shield (Holy, Ret), Lay on Hands (Prot,
+    Ret; Holy has it in its rotation), Ardent Defender + Guardian of Ancient Kings, Divine
+    Protection, Shield of Vengeance; Hunter Aspect of the Turtle, Exhilaration; Rogue Cloak of
+    Shadows, Evasion / Riposte, Crimson Vial; Priest Dispersion, Desperate Prayer; DK Icebound
+    Fortitude (Frost, Unholy; Blood's are in its rotation); Shaman Astral Shift; Mage Ice Block and
+    each spec's barrier (< 80%); Warlock Unending Resolve, Drain Life (on the enemy); Monk
+    Fortifying Brew, Touch of Karma; Druid Barkskin, Survival Instincts, Frenzied Regeneration;
+    DH Blur, Metamorphosis, Fiery Brand. `Playerbots.Combat.Defensives`.
+  - **Potions** (`BotConsumables::UsePotion`): from the bags only, any item whose on-use spell has
+    `SPELL_EFFECT_HEAL` (potions, healthstones) or `SPELL_EFFECT_ENERGIZE` with `POWER_MANA`,
+    highest item level the bot can use, cast with the item (`UseBagItem`: the core takes the charge
+    and starts the potion cooldown). At `Playerbots.Combat.PotionHealthPct` (30) / `PotionManaPct`
+    (20). **Alts only with `Playerbots.Combat.PotionsOnAlts = 1`** (their items; owner's alt rule).
+  - **Rest** (`PlayerbotAI::UpdateRest`, SkyFire's `CastRefreshmentSpell`): out of combat (nobody in
+    the group fighting, no enemy), below `Playerbots.Rest.HealthPct` (60) / `ManaPct` (50): stop,
+    sit, `AddAura` of SkyFire's level-tier food and drink spells (433..104934 / 430..104262; no
+    item; tiers stop at 85, so level 85+ bots use the MoP tier). Stands up (auras removed) when
+    full, when a fight starts or when its leader is more than 20 yd away; follow and combat wait
+    while `_resting`.
+- Not yet: tank threat bonus (owner: no), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
 
 ## Created bots, talents and gear (2026-11-05, untested)

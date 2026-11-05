@@ -86,6 +86,19 @@ namespace BotRotations
     void Initialize();
 
     SpecRotation const* GetRotation(uint32 specId);
+
+    // Defensive cooldowns (plan step 4.5): cast in combat when the bot's health is at or below
+    // belowPct, before the rotation; skipped while the bot already has an aura of that name.
+    struct Defensive
+    {
+        uint8 cls;
+        uint32 specId;              // 0 = every spec of the class
+        char const* spell;
+        float belowPct;
+        bool onEnemy;               // cast on the enemy (Drain Life, Touch of Karma, Fiery Brand)
+    };
+    std::vector<Defensive const*> DefensivesFor(uint8 cls, uint32 specId);
+    uint32 ClassFamily(uint8 cls);
     // the rotation's role, or one from the spec (tank/healer) and class when the spec has no rotation
     CombatRole RoleOf(Player const* bot);
 

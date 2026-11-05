@@ -19,6 +19,7 @@
 #include "BotRotations.h"
 #include "BotFactory.h"
 #include "BotGear.h"
+#include "BotConsumables.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "Timer.h"
@@ -175,8 +176,8 @@ void PlayerbotAI::HandleGroupInvite(Player* bot)
 void PlayerbotAI::UpdateFollow(Player* bot)
 {
     // combat owns the movement while engaged (or a healer walks to its heal target); moving would also
-    // break a cast
-    if (_engaged || !_healMoveGuid.IsEmpty() || bot->IsNonMeleeSpellCast(false))
+    // break a cast; a resting bot stays seated (UpdateRest stands it up when its leader walks off)
+    if (_engaged || _resting || !_healMoveGuid.IsEmpty() || bot->IsNonMeleeSpellCast(false))
         return;
 
     Group* group = bot->GetGroup();
@@ -1075,12 +1076,19 @@ void PlayerbotAI::UpdateCombat(Player* bot)
         enemy = (_engaged && current && current->IsAlive()) ? current : nullptr;
     }
 
+    UpdateRest(bot, members, enemy);
+    if (_resting)
+        return;
+
     if (enemy)
         Engage(bot, enemy, role);
     else if (_engaged)
         StopCombat(bot, "no enemy left");
 
     if (bot->IsNonMeleeSpellCast(false))
+        return;
+
+    if (bot->isInCombat() && TrySurvival(bot, enemy))
         return;
 
     if (loose && TryTaunt(bot, loose))
@@ -1632,5 +1640,109 @@ void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
     _wasWithOwner = false;
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out: it left its owner's group.", bot->GetName());
     bot->GetSession()->LogoutBot();
+}
+
+// ---- Defensives, potions, rest (plan step 4.5) -----------------------------------------------------------
+
+bool PlayerbotAI::TrySurvival(Player* bot, Unit* enemy)
+{
+    PlayerbotMgr::SurvivalOptions const& options = sPlayerbotMgr->GetSurvivalOptions();
+    float const health = bot->GetHealthPct();
+
+    if (options.defensives)
+    {
+        uint32 const family = BotRotations::ClassFamily(bot->getClass());
+        for (BotRotations::Defensive const* defensive : BotRotations::DefensivesFor(bot->getClass(), bot->GetSpecializationId()))
+        {
+            if (health > defensive->belowPct)
+                continue;
+            Unit* target = defensive->onEnemy ? enemy : static_cast<Unit*>(bot);
+            if (!target || (!defensive->onEnemy && BotRotations::HasAuraNamed(bot, defensive->spell, bot->GetGUID())))
+                continue;
+            uint32 const spellId = BotRotations::KnownSpell(bot, defensive->spell, family);
+            if (!spellId)
+                continue;
+            if (BotCombat::BotCast(bot, target, spellId, _throttle))
+            {
+                if (sPlayerbotMgr->GetCombatLog() >= 1)
+                    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' uses %s at %.0f%% health.", bot->GetName(), defensive->spell, health);
+                return true;
+            }
+        }
+    }
+
+    // potions are the bot's own items: alts only when the conf allows it (owner's alt rule)
+    bool const mayUseItems = _randomBot || options.potionsOnAlts;
+    if (mayUseItems && health <= options.potionHealthPct && BotConsumables::UsePotion(bot, false))
+    {
+        if (sPlayerbotMgr->GetCombatLog() >= 1)
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' drinks a healing potion at %.0f%% health.", bot->GetName(), health);
+        return true;
+    }
+    if (mayUseItems && bot->GetMaxPower(POWER_MANA) > 0 && bot->GetPowerPct(POWER_MANA) <= options.potionManaPct &&
+        BotConsumables::UsePotion(bot, true))
+    {
+        if (sPlayerbotMgr->GetCombatLog() >= 1)
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' drinks a mana potion.", bot->GetName());
+        return true;
+    }
+    return false;
+}
+
+// SkyFire's rest: sit with food/drink auras of the bot's level when low out of combat; stand when topped
+// up, when it or its group fights, or when its leader is more than RestLeaderDistance away
+void PlayerbotAI::UpdateRest(Player* bot, std::vector<Player*> const& members, Unit* enemy)
+{
+    PlayerbotMgr::SurvivalOptions const& options = sPlayerbotMgr->GetSurvivalOptions();
+    float const RestLeaderDistance = 20.0f;
+
+    bool groupFighting = enemy || bot->isInCombat() || !bot->getAttackers()->empty();
+    for (Player* member : members)
+        if (member->isInCombat())
+            groupFighting = true;
+
+    Player* leader = nullptr;
+    if (Group* group = bot->GetGroup())
+    {
+        ObjectGuid const leaderGuid = (!_master.IsEmpty() && group->IsMember(_master)) ? _master : group->GetLeaderGUID();
+        for (Player* member : members)
+            if (member->GetGUID() == leaderGuid && member != bot)
+                leader = member;
+    }
+    bool const leaderAway = leader && bot->GetDistance(leader) > RestLeaderDistance;
+
+    bool const usesMana = bot->GetMaxPower(POWER_MANA) > 0;
+    float const health = bot->GetHealthPct();
+    float const mana = usesMana ? bot->GetPowerPct(POWER_MANA) : 100.0f;
+
+    if (_resting)
+    {
+        bool const full = health >= 99.0f && mana >= 99.0f;
+        if (groupFighting || full || leaderAway || !bot->IsAlive())
+        {
+            _resting = false;
+            BotConsumables::StopRest(bot);
+            _followGuid.Clear();
+            _followTimer = FollowCheckInterval;
+        }
+        else if (!BotConsumables::HasRestAura(bot))
+            BotConsumables::StartRest(bot, health < 99.0f, mana < 99.0f);   // an aura ran out before full
+        return;
+    }
+
+    if (!options.rest || groupFighting || leaderAway || !bot->IsAlive() || bot->IsNonMeleeSpellCast(false) || _engaged)
+        return;
+    bool const needHealth = health < options.restHealthPct;
+    bool const needMana = usesMana && mana < options.restManaPct;
+    if (!needHealth && !needMana)
+        return;
+
+    _resting = true;
+    bot->GetMotionMaster()->Clear();
+    bot->GetMotionMaster()->MoveIdle();
+    // eat and drink together once sitting, as SkyFire
+    BotConsumables::StartRest(bot, health < 99.0f, mana < 99.0f);
+    if (sPlayerbotMgr->GetCombatLog() >= 1)
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' rests (health %.0f%%, mana %.0f%%).", bot->GetName(), health, mana);
 }
 

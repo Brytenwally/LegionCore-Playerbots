@@ -34,6 +34,13 @@ void PlayerbotMgr::LoadConfig()
     _combatLog = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.Combat.Log", 1), 2);
     _engageRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Combat.EngageRange", 30.0f));
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
+    _survival.defensives = sConfigMgr->GetBoolDefault("Playerbots.Combat.Defensives", true);
+    _survival.potionHealthPct = sConfigMgr->GetFloatDefault("Playerbots.Combat.PotionHealthPct", 30.0f);
+    _survival.potionManaPct = sConfigMgr->GetFloatDefault("Playerbots.Combat.PotionManaPct", 20.0f);
+    _survival.potionsOnAlts = sConfigMgr->GetBoolDefault("Playerbots.Combat.PotionsOnAlts", false);
+    _survival.rest = sConfigMgr->GetBoolDefault("Playerbots.Rest.Enable", true);
+    _survival.restHealthPct = sConfigMgr->GetFloatDefault("Playerbots.Rest.HealthPct", 60.0f);
+    _survival.restManaPct = sConfigMgr->GetFloatDefault("Playerbots.Rest.ManaPct", 50.0f);
 
     _gearOptions.minQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MinQuality", 0), 5);
     _gearOptions.maxQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxQuality", 4), 5);

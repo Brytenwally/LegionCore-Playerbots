@@ -135,3 +135,48 @@ Playerbots.AutoGear.IlvlCap.Factor100 = 7.0
 Playerbots.Pool.Accounts = 100
 Playerbots.Pool.Characters = 600
 Playerbots.Pool.LoginAtStartup = 50
+
+###################################################################################################
+# Survival (defensive cooldowns, potions, eating and drinking)
+###################################################################################################
+
+#
+#    Playerbots.Combat.Defensives
+#        Bots use their class's defensive cooldowns (Shield Wall, Ice Block, Barkskin...) in combat
+#        when their health drops low.
+#        Default: 1 - (On)
+#                 0 - (Off)
+
+Playerbots.Combat.Defensives = 1
+
+#
+#    Playerbots.Combat.PotionHealthPct
+#    Playerbots.Combat.PotionManaPct
+#        In combat, a bot drinks a healing potion (or healthstone) from its bags at or below this
+#        health %, a mana potion at or below this mana %. Only potions the bot carries.
+#        Default: 30, 20
+
+Playerbots.Combat.PotionHealthPct = 30
+Playerbots.Combat.PotionManaPct = 20
+
+#
+#    Playerbots.Combat.PotionsOnAlts
+#        Potions are the character's own items, so alt bots (characters of a player's account)
+#        drink them only when this is on.
+#        Default: 0 - (Off)
+#                 1 - (On)
+
+Playerbots.Combat.PotionsOnAlts = 0
+
+#
+#    Playerbots.Rest.Enable
+#    Playerbots.Rest.HealthPct
+#    Playerbots.Rest.ManaPct
+#        Out of combat a bot below these health / mana % sits down and eats / drinks (food and drink
+#        of its level, no items used) until full; it stands up if a fight starts or its leader walks
+#        more than 20 yards away.
+#        Default: 1, 60, 50
+
+Playerbots.Rest.Enable = 1
+Playerbots.Rest.HealthPct = 60
+Playerbots.Rest.ManaPct = 50

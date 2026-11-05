@@ -438,6 +438,51 @@ namespace BotRotations
             }
         };
 
+        // Defensive cooldowns per class/spec (7.3.5 spells; a name the server lacks is logged at startup)
+        std::vector<Defensive> const Defensives =
+        {
+            { CLASS_WARRIOR, 71, "Die by the Sword", 35.0f, false },
+            { CLASS_WARRIOR, 72, "Enraged Regeneration", 40.0f, false },
+            { CLASS_WARRIOR, 73, "Shield Wall", 30.0f, false },
+            { CLASS_WARRIOR, 73, "Last Stand", 35.0f, false },
+            { CLASS_PALADIN, 65, "Divine Shield", 20.0f, false },
+            { CLASS_PALADIN, 70, "Divine Shield", 20.0f, false },
+            { CLASS_PALADIN, 66, "Lay on Hands", 15.0f, false },
+            { CLASS_PALADIN, 70, "Lay on Hands", 15.0f, false },
+            { CLASS_PALADIN, 66, "Ardent Defender", 30.0f, false },
+            { CLASS_PALADIN, 66, "Guardian of Ancient Kings", 35.0f, false },
+            { CLASS_PALADIN, 65, "Divine Protection", 50.0f, false },
+            { CLASS_PALADIN, 70, "Shield of Vengeance", 50.0f, false },
+            { CLASS_HUNTER, 0, "Aspect of the Turtle", 20.0f, false },
+            { CLASS_HUNTER, 0, "Exhilaration", 40.0f, false },
+            { CLASS_ROGUE, 0, "Cloak of Shadows", 25.0f, false },
+            { CLASS_ROGUE, 259, "Evasion", 35.0f, false },
+            { CLASS_ROGUE, 261, "Evasion", 35.0f, false },
+            { CLASS_ROGUE, 260, "Riposte", 35.0f, false },
+            { CLASS_ROGUE, 0, "Crimson Vial", 50.0f, false },
+            { CLASS_PRIEST, 258, "Dispersion", 25.0f, false },
+            { CLASS_PRIEST, 0, "Desperate Prayer", 35.0f, false },
+            { CLASS_DEATH_KNIGHT, 251, "Icebound Fortitude", 30.0f, false },   // Blood has its own in its rotation
+            { CLASS_DEATH_KNIGHT, 252, "Icebound Fortitude", 30.0f, false },
+            { CLASS_SHAMAN, 0, "Astral Shift", 35.0f, false },
+            { CLASS_MAGE, 0, "Ice Block", 15.0f, false },
+            { CLASS_MAGE, 64, "Ice Barrier", 80.0f, false },
+            { CLASS_MAGE, 63, "Blazing Barrier", 80.0f, false },
+            { CLASS_MAGE, 62, "Prismatic Barrier", 80.0f, false },
+            { CLASS_WARLOCK, 0, "Unending Resolve", 35.0f, false },
+            { CLASS_WARLOCK, 0, "Drain Life", 40.0f, true },
+            { CLASS_MONK, 268, "Fortifying Brew", 35.0f, false },
+            { CLASS_MONK, 269, "Fortifying Brew", 35.0f, false },
+            { CLASS_MONK, 269, "Touch of Karma", 50.0f, true },
+            { CLASS_DRUID, 0, "Barkskin", 50.0f, false },
+            { CLASS_DRUID, 103, "Survival Instincts", 30.0f, false },
+            { CLASS_DRUID, 104, "Survival Instincts", 30.0f, false },
+            { CLASS_DRUID, 104, "Frenzied Regeneration", 60.0f, false },
+            { CLASS_DEMON_HUNTER, 577, "Blur", 40.0f, false },
+            { CLASS_DEMON_HUNTER, 581, "Metamorphosis", 30.0f, false },
+            { CLASS_DEMON_HUNTER, 581, "Fiery Brand", 40.0f, true },
+        };
+
         std::once_flag initOnce;
         std::map<std::string, std::vector<uint32>> spellsByName;    // lower-case name -> ids, read-only after Initialize
 
@@ -472,6 +517,8 @@ namespace BotRotations
                     wanted.insert(Lower(rotation.dispel));
                 if (rotation.taunt)
                     wanted.insert(Lower(rotation.taunt));
+                for (Defensive const& defensive : Defensives)
+                    wanted.insert(Lower(defensive.spell));
                 if (rotation.tauntAlt)
                     wanted.insert(Lower(rotation.tauntAlt));
             }
@@ -519,6 +566,35 @@ namespace BotRotations
             case CombatRole::Healer: return "healer";
             case CombatRole::Melee:  return "melee";
             default:                 return "ranged";
+        }
+    }
+
+    std::vector<Defensive const*> DefensivesFor(uint8 cls, uint32 specId)
+    {
+        std::vector<Defensive const*> list;
+        for (Defensive const& defensive : Defensives)
+            if (defensive.cls == cls && (!defensive.specId || defensive.specId == specId))
+                list.push_back(&defensive);
+        return list;
+    }
+
+    uint32 ClassFamily(uint8 cls)
+    {
+        switch (cls)
+        {
+            case CLASS_WARRIOR:      return SPELLFAMILY_WARRIOR;
+            case CLASS_PALADIN:      return SPELLFAMILY_PALADIN;
+            case CLASS_HUNTER:       return SPELLFAMILY_HUNTER;
+            case CLASS_ROGUE:        return SPELLFAMILY_ROGUE;
+            case CLASS_PRIEST:       return SPELLFAMILY_PRIEST;
+            case CLASS_DEATH_KNIGHT: return SPELLFAMILY_DEATHKNIGHT;
+            case CLASS_SHAMAN:       return SPELLFAMILY_SHAMAN;
+            case CLASS_MAGE:         return SPELLFAMILY_MAGE;
+            case CLASS_WARLOCK:      return SPELLFAMILY_WARLOCK;
+            case CLASS_MONK:         return SPELLFAMILY_MONK;
+            case CLASS_DRUID:        return SPELLFAMILY_DRUID;
+            case CLASS_DEMON_HUNTER: return SPELLFAMILY_DEMON_HUNTER;
+            default:                 return SPELLFAMILY_GENERIC;
         }
     }
 
