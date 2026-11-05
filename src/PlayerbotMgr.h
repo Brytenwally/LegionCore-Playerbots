@@ -36,6 +36,10 @@ public:
         Always              // also while the owner is in combat
     };
     SummonRevive GetSummonRevive() const { return _summonRevive; }
+    // combat: 0 = no combat log, 1 = engage/stop and each cast, 2 = also why each rotation step is skipped
+    uint32 GetCombatLog() const { return _combatLog; }
+    float GetEngageRange() const { return _engageRange; }
+    uint32 GetEngageDelay() const { return _engageDelay; }
 
     // Starts logging the character in as a bot. notifyGuid (may be empty) gets "Bot 'X' logged in."
     // when the character is in the world, or the reason it failed.
@@ -79,6 +83,9 @@ private:
 
     bool _enabled = false;
     SummonRevive _summonRevive = SummonRevive::OutOfCombat;
+    uint32 _combatLog = 1;
+    float _engageRange = 30.0f;
+    uint32 _engageDelay = 1200;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

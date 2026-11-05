@@ -13,7 +13,11 @@
 #include "Define.h"
 #include "ObjectGuid.h"
 #include "Position.h"
+#include "BotCombat.h"
+#include "BotRotations.h"
+#include <map>
 #include <string>
+#include <vector>
 
 class Player;
 class Quest;
@@ -28,6 +32,7 @@ struct OrderSender
     WorldLocation location;                                 // where he stood (summon)
     bool inCombat = false;                                  // he was in combat (summon revive)
     bool partyChat = false;                                 // given in party/raid chat, not whispered
+    ObjectGuid selection;                                   // his target (attack order)
 };
 
 class PlayerbotAI
@@ -68,6 +73,19 @@ private:
     // own objectives (owner's rule); refuses on bag space or daily/weekly limits, telling `to`.
     bool TurnInQuest(Player* bot, Quest const* quest, WorldObject* giver, ObjectGuid const& to);
     void HandleGroupInvite(Player* bot);
+    // Combat (plan steps 4.1 / 4.2): target by the never-pull rule and the assist mode, engage after the
+    // engage delay, then one rotation step per check. Healers do not melee; they heal and cast the
+    // rotation's enemy steps.
+    void UpdateCombat(Player* bot);
+    Unit* SelectTarget(Player* bot, std::vector<Player*> const& members, bool& ordered);
+    void Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role);
+    void StopCombat(Player* bot, char const* reason);
+    void RunRotation(Player* bot, std::vector<Player*> const& members, BotRotations::CombatRole role, Unit* enemy);
+    // the owner among the members (his master, or a client player of his account), null if not on the map
+    Player* FindOwner(std::vector<Player*> const& members) const;
+    void LogSkip(Player* bot, size_t step, char const* spell, std::string const& reason);
+    void AttackOrder(Player* bot, OrderSender const& sender);
+    bool AssistOrder(Player* bot, OrderSender const& sender, std::string const& mode);
     void UpdateFollow(Player* bot);
     void StopFollowing(Player* bot);
     void Say(Player* bot, ObjectGuid const& to, std::string const& text);
@@ -85,6 +103,21 @@ private:
     void const* _answeredInvite = nullptr;
     ObjectGuid _followGuid;                                 // who the current follow movement targets
     uint32 _followTimer = 0;
+
+    enum class AssistMode : uint8
+    {
+        Full,                                               // whatever attacks the group
+        Defend,                                             // only what attacks the owner or the bot
+        Passive                                             // only ordered targets and self-defence
+    };
+    AssistMode _assist = AssistMode::Full;
+    ObjectGuid _orderedTarget;                              // "attack" order: fought until it dies
+    ObjectGuid _combatTarget;                               // the enemy engaged (melee/ranged chase)
+    bool _engaged = false;
+    uint32 _combatTimer = 0;
+    BotCombat::SpellThrottle _throttle;
+    BotCombat::EngageTimer _engageTimer;
+    std::map<size_t, std::string> _lastSkip;                // rotation step -> last logged skip reason (log level 2)
 };
 
 #endif

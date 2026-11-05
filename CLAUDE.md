@@ -174,6 +174,44 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
 - Compiled in the container against the core (scripts PCH), and on Windows in LegionCore-Build
   run #15 (core `77189b3` + `092a80c`), 2026-11-03.
 
+## Combat (plan steps 4.1 + 4.2, 2026-11-05, not yet tested on the server)
+
+- `PlayerbotAI::UpdateCombat` every 250 ms on the bot's thread (before follow; `UpdateFollow` does
+  nothing while `_engaged` or casting, since movement would break a cast).
+- Target (`SelectTarget`, LegionBotAI's rules): an `attack`-ordered target first (the owner's
+  `GetSelection()`, read in his thread into `OrderSender::selection`; no delay, no range, no
+  never-pull check); else, by `assist` mode (`full` default: any group member, the owner first;
+  `defend`: the owner and the bot; `passive`: none) the bot's current victim if still attacking an
+  ally, the owner's victim if attacking an ally, or the first attacker of an ally
+  (`FindAttackerOf`); in every mode self-defence (`getAttackerForHelper`). Only within
+  `Playerbots.Combat.EngageRange` (30 yd) of the bot. A new enemy waits
+  `Playerbots.Combat.EngageDelay` (1200 ms, `EngageTimer`).
+- Engage: tank/melee `Attack(enemy, true)` + `MoveChase(enemy)`; ranged `Attack(enemy, false)` +
+  `MoveChase(enemy, 25)`; healers never engage (they follow and heal). In `stay`, no chase. No enemy
+  left -> `StopCombat` (AttackStop, MoveIdle, follow again at once).
+- Role (`BotRotations::RoleOf`): the rotation's role (tank/healer/melee/ranged); specs without a
+  rotation fall back to the spec role and class.
+- Rotation (`RunRotation`, AshamaneCore's `ProcessBotCombatAI`): interrupt (if the enemy casts
+  something interruptible), dispel (`TryDispel` over the members), then the first step whose spell
+  the bot knows, whose condition holds and that `BotCast` accepts; one cast per check. Healer target
+  = `FindLowestHpAlly` below 90% (tank first below 75%), also out of combat.
+- `src/combat/BotRotations.*`: AshamaneCore-Legion735's `g_BotSpecRotations` (36 specs) as data.
+  Spell names are looked up once (`Initialize`, at `OnStartup`) in `sSpellMgr` by exact
+  (lower-case) `SpellInfo::SpellName`; **a step casts the highest-id spell of that name the bot
+  knows (`HasSpell`), its class family (`ClassOptions.SpellClassSet`) first**, instead of
+  AshamaneCore's "highest id" guess. Aura conditions accept any spell of the aura's name (target
+  auras only from the bot). Names no spell carries are logged at startup (`Rotations: no spell
+  named ...`).
+- Power conditions use displayed units: `GetPower / PowerType.db2 DisplayModifier`
+  (`sDB2Manager.GetPowerType(enum)`): rage, runic power and soul shards are stored x10 on this core
+  (`spell_warlock.cpp` divides soul shard costs by 10).
+- Logs (`Playerbots.Combat.Log`): 1 = `Bot 'X' (role) engages Y.`, `Bot 'X' casts Spell (id) on Y.`,
+  `Bot 'X' stops fighting: reason.`; 2 = also `Bot 'X' skips Spell: reason` (not known, condition
+  not met: ..., on cooldown, global cooldown, AI delay, cast failed (result N) = `SpellCastResult`),
+  logged when a step's reason changes.
+- Not yet: taunts and tank threat (4.4), defensives/potions (4.5), ground-effect dodge
+  (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
+
 ## Status
 
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the

@@ -93,8 +93,9 @@ namespace BotCombat
     bool IsAttackingAlly(Unit* enemy, Player* ally);
     // LegionBotAI's pull rule: only a unit attacking one of these allies may be engaged
     bool IsAggressorOf(Unit* enemy, std::vector<Player*> const& allies);
-    // the first unit attacking one of the allies that the bot may attack
-    Unit* FindAttackerOf(Player* bot, std::vector<Player*> const& allies);
+    // the first unit attacking one of the allies (in their order) that the bot may attack, within
+    // maxDistance of the bot (0 = any distance)
+    Unit* FindAttackerOf(Player* bot, std::vector<Player*> const& allies, float maxDistance = 0.0f);
 
     // allies alive below healthPct within radius of center
     uint32 CountInjured(std::vector<Player*> const& allies, Unit* center, float radius, float healthPct = 85.0f);

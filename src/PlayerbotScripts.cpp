@@ -12,6 +12,7 @@
 #include "Group.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
+#include "BotRotations.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
 #include "QuestDef.h"
@@ -29,6 +30,7 @@ public:
 
     void OnStartup() override
     {
+        BotRotations::Initialize();
         TC_LOG_INFO("server.loading", "[mod-playerbots] Module loaded (%s). GM commands: .playerbots add/remove/list.",
             sPlayerbotMgr->IsEnabled() ? "enabled" : "disabled");
     }
@@ -147,6 +149,7 @@ private:
         order.location = WorldLocation(sender->GetMapId(), sender->GetPositionX(), sender->GetPositionY(),
             sender->GetPositionZ(), sender->GetOrientation());
         order.inCombat = sender->isInCombat();
+        order.selection = sender->GetSelection();
         return order;
     }
 

@@ -153,14 +153,15 @@ namespace BotCombat
         return false;
     }
 
-    Unit* FindAttackerOf(Player* bot, std::vector<Player*> const& allies)
+    Unit* FindAttackerOf(Player* bot, std::vector<Player*> const& allies, float maxDistance)
     {
         for (Player* ally : allies)
         {
             if (!ally->IsAlive() || ally->GetMap() != bot->GetMap())
                 continue;
             for (Unit* attacker : *ally->getAttackers())
-                if (IsAttackingAlly(attacker, ally) && bot->IsValidAttackTarget(attacker))
+                if (IsAttackingAlly(attacker, ally) && bot->IsValidAttackTarget(attacker) &&
+                    (maxDistance <= 0.0f || bot->GetDistance(attacker) <= maxDistance))
                     return attacker;
         }
         return nullptr;

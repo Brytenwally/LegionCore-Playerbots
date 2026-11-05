@@ -25,3 +25,28 @@ Playerbots.Enable = 0
 #                 2 - (Also while the owner is in combat)
 
 Playerbots.Summon.Revive = 1
+
+#
+#    Playerbots.Combat.Log
+#        Combat lines in the server log (Server.log, "[mod-playerbots] ...").
+#        Default: 1 - (A bot engaging or stopping, and each spell it casts)
+#                 0 - (None)
+#                 2 - (Also why each rotation step was skipped: not known, condition not met,
+#                      cooldown, cast failed with the core's result... logged when the reason changes)
+
+Playerbots.Combat.Log = 1
+
+#
+#    Playerbots.Combat.EngageRange
+#        Bots fight enemies within this many yards of themselves (an "attack" order has no limit).
+#        Default: 30
+
+Playerbots.Combat.EngageRange = 30
+
+#
+#    Playerbots.Combat.EngageDelay
+#        Milliseconds a bot waits after choosing a new enemy before it attacks, so its owner
+#        swings first. Not applied to an "attack" order.
+#        Default: 1200
+
+Playerbots.Combat.EngageDelay = 1200
