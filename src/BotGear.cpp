@@ -157,6 +157,18 @@ namespace BotGear
         {
             return proto->GetBaseItemLevel();
         }
+
+        // Highest item level for a bot level (LegionBotAI's IlvlCapForLevel). Needed because many quest
+        // rewards have no required level: the owner saw a level 15 bot take item level 840 quest rewards
+        // (2026-11-05, build #21).
+        uint32 ItemLevelCapFor(uint8 level)
+        {
+            if (level <= 60)  return level * 2 + 6;
+            if (level <= 80)  return level * 3;
+            if (level <= 90)  return level * 5;
+            if (level <= 100) return level * 8;
+            return 0;                                       // 101-110: no cap (Legion items)
+        }
     }
 
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel)
@@ -230,6 +242,7 @@ namespace BotGear
             return result;
 
         uint8 const level = bot->getLevel();
+        uint32 const levelCap = ItemLevelCapFor(level);
         uint32 const armorType = WornArmorType(bot);
         Hands const hands = HandsFor(spec);
 
@@ -264,6 +277,8 @@ namespace BotGear
                 continue;
             uint32 const itemLevel = ItemLevelOf(proto);
             if (options.maxItemLevel && itemLevel > options.maxItemLevel)
+                continue;
+            if (levelCap && itemLevel > levelCap)
                 continue;
             if (proto->GetBaseRequiredLevel() > int32(level) || proto->GetScalingStatDistribution())
                 continue;

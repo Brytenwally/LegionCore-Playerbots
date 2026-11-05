@@ -32,6 +32,18 @@ namespace BotFactory
         uint32 team = 0;                // ALLIANCE / HORDE: the creator's faction
         WorldLocation location;         // where the creator stood
         ObjectGuid creator;
+        uint32 creatorAccount = 0;      // for his party invite to the bot
+    };
+
+    // a bot character in the characters database
+    struct StoredBot
+    {
+        ObjectGuid guid;
+        std::string name;
+        uint8 race = 0;
+        uint8 cls = 0;
+        uint8 level = 0;
+        uint32 account = 0;
     };
 
     struct CreateConfig
@@ -39,7 +51,18 @@ namespace BotFactory
         std::string accountPrefix = "PLAYERBOT";
         std::string accountPassword = "playerbot";
         uint32 charactersPerAccount = 10;
+        uint32 poolAccounts = 2;        // bot accounts made at startup
+        uint32 poolCharacters = 20;     // bot characters made at startup (all bot accounts together)
+        uint32 poolLogins = 5;          // of them logged in at startup, standing on GM Island
     };
+
+    // World thread, synchronous queries. Ids of the bot accounts (<prefix>...).
+    std::vector<uint32> BotAccountIds(CreateConfig const& config);
+    // offline (online = 0) bot characters, of a class or any (cls 0)
+    std::vector<StoredBot> OfflineBots(std::vector<uint32> const& accounts, uint8 cls);
+    uint32 CountCharacters(std::vector<uint32> const& accounts);
+    // makes the missing pool accounts and characters (classes in turn, factions alternating)
+    void EnsurePool(CreateConfig const& config);
 
     // class from a name ("warrior", "dk", "demon hunter"...), 0 if unknown
     uint8 ClassFromName(std::string name);

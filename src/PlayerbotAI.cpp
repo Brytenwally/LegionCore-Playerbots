@@ -6,6 +6,7 @@
 #include "PlayerbotMgr.h"
 #include "DB2Stores.h"
 #include "Group.h"
+#include "World.h"
 #include "CellImpl.h"
 #include "Creature.h"
 #include "GameObject.h"
@@ -67,6 +68,17 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
 {
     if (!bot->IsInWorld() || bot->IsBeingTeleported())
         return;
+
+    if (!_inviteCreator.IsEmpty())
+    {
+        if (_inviteTimer > diff)
+            _inviteTimer -= diff;
+        else
+        {
+            SendCreatorInvite(bot);
+            _inviteCreator.Clear();
+        }
+    }
 
     HandleGroupInvite(bot);
 
@@ -1441,6 +1453,37 @@ void PlayerbotAI::InitializeNewBot(Player* bot, BotFactory::CreateRequest const&
 {
     std::string const summary = BotFactory::InitializeNewBot(bot, request);
     Say(bot, request.creator, summary + " Say 'talents' to see or change my spec, 'autogear' after a change.");
+
+    // owner's request: a created bot joins its creator's party
+    _inviteCreator = request.creator;
+    _inviteAccount = request.creatorAccount;
+    _inviteTimer = 3000;
+}
+
+// as if the creator typed /invite <bot>: CMSG_PARTY_INVITE queued on his session (PartyInviteClient::Read: int8
+// PartyIndex, int32 ProposedRoles, packed guid, 9 bits name length, 9 bits realm length, name, realm), so the
+// core's HandlePartyInvite does every check on his thread; the bot then accepts (HandleGroupInvite)
+void PlayerbotAI::SendCreatorInvite(Player* bot)
+{
+    if (Group* group = bot->GetGroup())
+        if (group->IsMember(_inviteCreator))
+            return;
+
+    WorldSessionPtr session = sWorld->FindSession(_inviteAccount);
+    Player* creator = session ? session->GetPlayer() : nullptr;
+    if (!creator || creator->GetGUID() != _inviteCreator)
+        return;                                             // he logged out or switched character
+
+    std::string const name = bot->GetName();
+    WorldPacket* packet = new WorldPacket(CMSG_PARTY_INVITE, 32 + name.size());
+    *packet << int8(0);
+    *packet << int32(0);
+    *packet << bot->GetGUID();
+    packet->WriteBits(name.size(), 9);
+    packet->WriteBits(0, 9);
+    packet->FlushBits();
+    packet->WriteString(name);
+    session->QueuePacket(packet);
 }
 
 // "autogear": the best gear for the current spec within playerbots.conf's limits; replaced pieces go to the

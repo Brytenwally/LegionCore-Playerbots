@@ -338,6 +338,34 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   1-4>` (switch spec with `ForceChangeTalentGroup`, fill rows), `autogear` (not in combat; an order,
   so allowed on alts). GM command `.playerbots create <class> [spec]` (in game: level, faction and
   position come from the GM; class names incl. `dk`, `dh`, `demon hunter`).
+- **Owner's test of build #21 (2026-11-05):** `.playerbots create` and `talents` **work**; gear is
+  right for the spec, but **autogear took item level 840 quest rewards on a level 15 bot**: many
+  quest rewards have no required level, so the required-level filter let them through. Fix:
+  an item level cap by bot level (`ItemLevelCapFor`, LegionBotAI's `IlvlCapForLevel`: level x2+6
+  up to 60, x3 up to 80, x5 up to 90, x8 up to 100, none at 101-110), on top of
+  `Playerbots.AutoGear.MaxItemLevel`. **Rule: never trust required level alone for gear.**
+- **Owner's requests after that test (2026-11-05):**
+  - A created bot **joins its creator's party**: 3 s after its setup, `PlayerbotAI::SendCreatorInvite`
+    queues `CMSG_PARTY_INVITE` on the creator's session (`sWorld->FindSession(creatorAccount)`,
+    checked to still hold the creator; `PartyInviteClient::Read`: int8 PartyIndex, int32
+    ProposedRoles, packed guid, 9 bits name length, 9 bits realm length, name, realm), so the
+    core's `HandlePartyInvite` runs on his thread as for `/invite`; the bot accepts it like any
+    master's invite. `CreateRequest::creatorAccount` is read in the GM's thread.
+  - **Startup pool**: `PlayerbotMgr::UpdatePool` (first world update, `Playerbots.Enable` only):
+    `BotFactory::EnsurePool` makes accounts `<prefix>1..Playerbots.Pool.Accounts` (2) and bot
+    characters up to `Playerbots.Pool.Characters` (20, counted over all `<prefix>%` accounts;
+    classes in turn, factions alternating, starting level); 5 s later
+    `Playerbots.Pool.LoginAtStartup` (5) offline ones log in with no master and are teleported to
+    GM Island (map 1, 16222.1 16252.1 12.59).
+  - **`.playerbots create` reuses before creating** (`ReuseBot`): first a logged-in bot of a bot
+    account with no master (the pool), of the class, the creator's faction
+    (`Player::TeamForRace`) and at most his level, highest level first, read from
+    `sWorld->GetCharacterInfo` (not the player, which lives on another thread); it gets a **new
+    `PlayerbotAI`** whose master is the creator (`_master` is constant and read from any thread),
+    and the setup is posted to its thread. Else an offline bot character (`OfflineBots`: `SELECT
+    ... FROM characters WHERE online = 0 AND account IN (bot accounts) AND class = ?`), logged in
+    with the setup pending. Only when neither exists is a new character made. Bot accounts =
+    `SELECT id FROM account WHERE username LIKE '<PREFIX>%'` (prefix reduced to letters/digits).
 - Not yet: Warrior and Demon Hunter talent builds, gems/enchants, bonus IDs (item
   levels are the templates' base levels), artifact weapons (AshamaneCore's table, step 5),
   `Game.Patch` item level tiers.

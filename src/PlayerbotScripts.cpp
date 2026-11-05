@@ -301,6 +301,7 @@ public:
         request.location = WorldLocation(player->GetMapId(), player->GetPositionX(), player->GetPositionY(),
             player->GetPositionZ(), player->GetOrientation());
         request.creator = player->GetGUID();
+        request.creatorAccount = handler->GetSession()->GetAccountId();
 
         sPlayerbotMgr->RequestCreate(request);
         handler->PSendSysMessage("Creating a level %u %s bot...", uint32(request.level), BotFactory::ClassName(cls));

@@ -127,6 +127,12 @@ private:
     ObjectGuid _healMoveGuid;                               // a healer walking to an out-of-reach heal target
     uint32 _combatTimer = 0;
     uint32 _talentTimer = 0;
+    // a created bot invites itself into its creator's party: his session sends the invite a few seconds after
+    // the setup (the bot is teleporting to him meanwhile), and the bot accepts it as any master's invite
+    ObjectGuid _inviteCreator;
+    uint32 _inviteAccount = 0;
+    uint32 _inviteTimer = 0;
+    void SendCreatorInvite(Player* bot);
     BotCombat::SpellThrottle _throttle;
     BotCombat::EngageTimer _engageTimer;
     std::map<size_t, std::string> _lastSkip;                // rotation step -> last logged skip reason (log level 2)

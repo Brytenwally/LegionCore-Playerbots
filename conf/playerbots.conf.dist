@@ -94,3 +94,19 @@ Playerbots.AutoGear.MaxQuality = 4
 #        Default: 0
 
 Playerbots.AutoGear.MaxItemLevel = 0
+
+#
+#    Playerbots.Pool.Accounts
+#    Playerbots.Pool.Characters
+#    Playerbots.Pool.LoginAtStartup
+#        At startup the server makes the missing bot accounts (<AccountPrefix>1..Accounts) and bot
+#        characters (Characters in all, classes in turn, factions alternating, starting level), then
+#        logs LoginAtStartup of them in; they wait on GM Island. ".playerbots create <class>" first
+#        takes a free logged-in bot, then an offline bot character, of that class, of the GM's faction
+#        and at most his level, levels and sets it up and brings it into his party; only when there is
+#        none is a new character made. 0 turns each part off.
+#        Default: 2, 20, 5
+
+Playerbots.Pool.Accounts = 2
+Playerbots.Pool.Characters = 20
+Playerbots.Pool.LoginAtStartup = 5

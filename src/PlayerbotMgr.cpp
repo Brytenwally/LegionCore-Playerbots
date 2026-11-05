@@ -37,6 +37,9 @@ void PlayerbotMgr::LoadConfig()
     _createConfig.accountPrefix = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPrefix", "PLAYERBOT");
     _createConfig.accountPassword = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPassword", "playerbot");
     _createConfig.charactersPerAccount = std::max<uint32>(1, sConfigMgr->GetIntDefault("Playerbots.Create.CharactersPerAccount", 10));
+    _createConfig.poolAccounts = sConfigMgr->GetIntDefault("Playerbots.Pool.Accounts", 2);
+    _createConfig.poolCharacters = sConfigMgr->GetIntDefault("Playerbots.Pool.Characters", 20);
+    _createConfig.poolLogins = sConfigMgr->GetIntDefault("Playerbots.Pool.LoginAtStartup", 5);
     if (_createConfig.accountPrefix.size() < 3)
         _createConfig.accountPrefix = "PLAYERBOT";
 }
@@ -184,6 +187,10 @@ void PlayerbotMgr::ProcessCreates(uint32 diff)
 
     for (BotFactory::CreateRequest const& request : requests)
     {
+        // owner's rule: a bot already in the database (logged in or not) is used before a new one is made
+        if (ReuseBot(request))
+            continue;
+
         std::string error;
         std::string const name = BotFactory::CreateCharacter(request, _createConfig, error);
         if (name.empty())
@@ -219,8 +226,113 @@ void PlayerbotMgr::ProcessCreates(uint32 diff)
     }
 }
 
+bool PlayerbotMgr::ReuseBot(BotFactory::CreateRequest const& request)
+{
+    std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
+    auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
+    auto fits = [&request](uint8 race, uint8 cls, uint8 level)
+    {
+        return cls == request.cls && Player::TeamForRace(race) == request.team && level <= request.level;
+    };
+
+    // a logged-in bot of a bot account that nobody leads (the startup pool), the highest level first
+    ObjectGuid bestGuid;
+    Bot* best = nullptr;
+    uint8 bestLevel = 0;
+    for (auto& pair : _bots)
+    {
+        Bot& bot = pair.second;
+        if (bot.removing || !bot.inWorld || !bot.notifyGuid.IsEmpty() || bot.init || !onBotAccount(bot.session->GetAccountId()))
+            continue;
+        CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);   // no touching the player off its thread
+        if (!info || !fits(info->Race, info->Class, info->Level) || (best && info->Level <= bestLevel))
+            continue;
+        best = &bot;
+        bestGuid = pair.first;
+        bestLevel = info->Level;
+    }
+
+    if (best)
+    {
+        best->notifyGuid = request.creator;
+        best->toGMIsland = false;
+        // a new AI: its master (constant, read from any thread by IsMaster) is the creator now
+        std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(request.creator, best->session->GetAccountId());
+        {
+            std::lock_guard<std::mutex> lock(_aiLock);
+            _ais[bestGuid] = ai;
+        }
+        std::shared_ptr<BotFactory::CreateRequest> init = std::make_shared<BotFactory::CreateRequest>(request);
+        ObjectAccessor::PostToPlayer(bestGuid, [ai, init](Player* p) -> void { ai->InitializeNewBot(p, *init); });
+        TC_LOG_INFO("server.loading", "[mod-playerbots] .playerbots create: reusing logged-in bot '%s'.", best->name.c_str());
+        Notify(request.creator, "Bot '" + best->name + "' is coming.");
+        return true;
+    }
+
+    // an offline bot character, the highest level first
+    BotFactory::StoredBot found;
+    for (BotFactory::StoredBot const& stored : BotFactory::OfflineBots(accounts, request.cls))
+        if (fits(stored.race, stored.cls, stored.level) && _bots.find(stored.guid) == _bots.end() &&
+            (found.guid.IsEmpty() || stored.level > found.level))
+            found = stored;
+    if (found.guid.IsEmpty())
+        return false;
+
+    std::string error;
+    if (!AddBot(found.name, request.creator, error))
+    {
+        TC_LOG_ERROR("server.loading", "[mod-playerbots] .playerbots create: could not log in '%s': %s", found.name.c_str(), error.c_str());
+        return false;
+    }
+    if (Bot* bot = FindBotByName(found.name))
+        bot->init = std::make_shared<BotFactory::CreateRequest>(request);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] .playerbots create: logging in stored bot '%s'.", found.name.c_str());
+    Notify(request.creator, "Logging in bot '" + found.name + "'...");
+    return true;
+}
+
+// Startup pool (owner's request, 2026-11-05): Playerbots.Pool.Accounts bot accounts and
+// Playerbots.Pool.Characters bot characters exist; Playerbots.Pool.LoginAtStartup of them log in and wait
+// on GM Island until ".playerbots create" takes one.
+void PlayerbotMgr::UpdatePool(uint32 diff)
+{
+    if (!_poolMade)
+    {
+        _poolMade = true;
+        BotFactory::EnsurePool(_createConfig);
+        if (_createConfig.poolLogins)
+            _poolLoginDelay = 5000;                         // new characters' rows must reach the database first
+        return;
+    }
+
+    if (_poolLoginDelay < 0)
+        return;
+    _poolLoginDelay -= int32(diff);
+    if (_poolLoginDelay > 0)
+        return;
+    _poolLoginDelay = -1;
+
+    uint32 started = 0;
+    for (BotFactory::StoredBot const& stored : BotFactory::OfflineBots(BotFactory::BotAccountIds(_createConfig), 0))
+    {
+        if (started >= _createConfig.poolLogins)
+            break;
+        if (_bots.find(stored.guid) != _bots.end())
+            continue;
+        std::string error;
+        if (!AddBot(stored.name, ObjectGuid::Empty, error))
+            continue;
+        if (Bot* bot = FindBotByName(stored.name))
+            bot->toGMIsland = true;
+        ++started;
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: logging in %u bot(s) to GM Island.", started);
+}
+
 void PlayerbotMgr::Update(uint32 diff)
 {
+    if (_enabled)
+        UpdatePool(diff);
     ProcessCreates(diff);
 
     // owner's rule (SkyFire): a player logging out takes the bots of his account with him, so his
@@ -275,6 +387,15 @@ void PlayerbotMgr::Update(uint32 diff)
                     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logged in (map %u).", bot.name.c_str(), player->GetMapId());
                     // SquidBots Lite (SkyFire) parses this exact text: keep the wording
                     Notify(bot.notifyGuid, "Bot '" + bot.name + "' logged in.");
+
+                    if (bot.toGMIsland)
+                    {
+                        bot.toGMIsland = false;
+                        ObjectAccessor::PostToPlayer(itr->first, [](Player* p) -> void
+                        {
+                            p->TeleportTo(1, 16222.1f, 16252.1f, 12.5872f, 1.35f);  // GM Island
+                        });
+                    }
 
                     // a created bot: set it up on its own thread
                     if (bot.init)

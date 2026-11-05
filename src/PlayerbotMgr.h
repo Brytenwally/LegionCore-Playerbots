@@ -84,7 +84,14 @@ private:
         bool inWorld = false;                               // "logged in" was reported
         bool removing = false;
         std::shared_ptr<BotFactory::CreateRequest> init;    // a created bot, initialized once in the world
+        bool toGMIsland = false;                            // a pool bot logged in at startup: waits on GM Island
     };
+    // ".playerbots create": an idle logged-in pool bot, else an offline bot character, of the class and the
+    // creator's faction and at most his level; false when there is none (a new one is made)
+    bool ReuseBot(BotFactory::CreateRequest const& request);
+    void UpdatePool(uint32 diff);
+    bool _poolMade = false;
+    int32 _poolLoginDelay = -1;                             // ms until the startup logins, -1 = none pending
 
     struct PendingLogin
     {
