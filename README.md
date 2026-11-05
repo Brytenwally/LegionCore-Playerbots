@@ -64,6 +64,8 @@ When you log out, the bots of your account (your alts) log out with you.
   `follow`, `loot` (loots our kills after the fight; `Playerbots.Loot.MinQuality`), `rest`, `roll`,
   `autoequip`, `talents`. The older orders (`follow`, `stay`, `passive`, `assist ...`, `player tank`,
   `bot tank`) switch the same strategies. Defaults in `Playerbots.Strategies.*`.
+- **Dead groups**: once a minute a bot checks its group; with no player online in it for two checks in
+  a row it leaves (a random bot is reset and returns to GM Island).
 - **Formations**: `formation` shows the current one, `formation <name>` sets it: `role` (default:
   tank ahead at your side, melee rear left, ranged rear right, healer behind), `near`, `line`,
   `queue`, `circle`, `arrow`, `shield`, `chaos`, `far` (`Playerbots.Formation.Default`).
