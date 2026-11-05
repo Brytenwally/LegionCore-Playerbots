@@ -218,6 +218,22 @@ server** (see Status, 2026-11-05).
   **`passive`** (= `assist passive`) makes the bot passive towards enemies: it stops its fight at
   once, drops the ordered target and fights nothing, not even self-defence, until `attack` (an
   ordered target is still fought) or `assist full|defend`. Healing goes on.
+- **Healers (plan step 4.3, 2026-11-05, untested):** heal target = `FindLowestHpAlly` below 90%
+  (tank first below 75%, the bot itself below 90% when nobody else needs it), in and out of
+  combat. **Triage** (LegionBotAI): a heal target below 40% gets the rotation first, before
+  interrupt and dispel. A heal target beyond 35 yd or out of line of sight -> `MoveToHealTarget`
+  (`MoveFollow(target, 15 yd)`, `_healMoveGuid`; `UpdateFollow` waits; cleared once in reach,
+  healed, on `stay` or death). New step targets `Tank` (first alive member with the tank spec
+  role, not the bot, else the owner) and `Owner`, used only while there is an enemy or a heal
+  target; new conditions `InjuredNearTarget` / `InjuredNearSelf` (`value` allies below 85% within
+  `radius`, new `RotationStep::radius`). Holy Priest and Holy Paladin now use LegionBotAI's lists
+  (Guardian Spirit / Lay on Hands < 25%, Prayer of Mending / Beacon of Light on the tank, Beacon
+  of Faith on the owner, Prayer of Healing / Light of Dawn for 3 injured in 15 yd, Serenity / Holy
+  Shock < 75%, Flash Heal / Flash of Light < 55%, Renew, Bestow Faith < 85%, Heal / Holy Light,
+  then Flash Heal / Flash of Light as low-level filler); Holy Priest's dispel is **Purify**
+  (AshamaneCore had Dispel Magic, offensive on 7.3.5). Resto Shaman / Druid, Mistweaver and Disc
+  keep AshamaneCore's lists. Not yet: healers dealing damage when nobody needs healing, mana /
+  drinking (4.5), Light of Dawn's cone aims at the heal target only.
 - Not yet: taunts and tank threat (4.4), defensives/potions (4.5), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
 

@@ -81,6 +81,7 @@ private:
     void Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role);
     void StopCombat(Player* bot, char const* reason);
     void RunRotation(Player* bot, std::vector<Player*> const& members, BotRotations::CombatRole role, Unit* enemy);
+    void MoveToHealTarget(Player* bot, Player* healTarget);
     // the owner among the members (his master, or a client player of his account), null if not on the map
     Player* FindOwner(std::vector<Player*> const& members) const;
     void LogSkip(Player* bot, size_t step, char const* spell, std::string const& reason);
@@ -114,6 +115,7 @@ private:
     ObjectGuid _orderedTarget;                              // "attack" order: fought until it dies or "passive"
     ObjectGuid _combatTarget;                               // the enemy engaged (melee/ranged chase)
     bool _engaged = false;
+    ObjectGuid _healMoveGuid;                               // a healer walking to an out-of-reach heal target
     uint32 _combatTimer = 0;
     BotCombat::SpellThrottle _throttle;
     BotCombat::EngageTimer _engageTimer;

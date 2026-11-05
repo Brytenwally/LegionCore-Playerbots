@@ -42,14 +42,18 @@ namespace BotRotations
         ResourceAtLeast,            // the bot's power `power` at least value, in displayed units
         AuraMissingOnSelf,          // the bot lacks auxSpell
         AuraPresentOnSelf,          // the bot has auxSpell (a proc)
-        AuraMissingOnTarget         // the target lacks auxSpell from the bot (DoT, HoT)
+        AuraMissingOnTarget,        // the target lacks auxSpell from the bot (DoT, HoT)
+        InjuredNearTarget,          // at least value allies below 85% within radius of the target (group heals)
+        InjuredNearSelf             // at least value allies below 85% within radius of the bot (cones, PBAoE)
     };
 
     enum class StepTarget : uint8
     {
         RoleDefault,                // healers: the heal target; others: the enemy
         Enemy,
-        HealTarget
+        HealTarget,
+        Tank,                       // the group's tank on the bot's map (not the bot), else the owner
+        Owner                       // the bot's owner, on the bot's map
     };
 
     struct RotationStep
@@ -60,6 +64,7 @@ namespace BotRotations
         uint32 power = 0;           // Powers, for ResourceAtLeast
         char const* auxSpell = nullptr;
         StepTarget target = StepTarget::RoleDefault;
+        float radius = 0.0f;        // yards, for Injured* conditions
     };
 
     struct SpecRotation
@@ -86,8 +91,9 @@ namespace BotRotations
     bool HasAuraNamed(Unit const* unit, char const* name, ObjectGuid const& caster = ObjectGuid::Empty);
     // power as the client shows it (rage, runic power, soul shards are stored x10)
     float DisplayedPower(Player const* bot, Powers power);
-    // step's condition for this bot and target; target may be null for Self* conditions
-    bool CheckCondition(Player* bot, Unit* target, RotationStep const& step);
+    // step's condition for this bot and target; target may be null for Self* conditions; allies = the
+    // group members on the bot's map (Injured* conditions)
+    bool CheckCondition(Player* bot, Unit* target, RotationStep const& step, std::vector<Player*> const& allies);
     std::string DescribeCondition(RotationStep const& step);
 }
 

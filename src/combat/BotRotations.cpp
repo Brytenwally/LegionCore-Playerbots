@@ -3,6 +3,7 @@
  */
 
 #include "BotRotations.h"
+#include "BotCombat.h"
 #include "DB2Stores.h"
 #include "Log.h"
 #include "Player.h"
@@ -104,14 +105,20 @@ namespace BotRotations
                 },
                 "Rebuke"
             },
-            // Paladin Holy
+            // Paladin Holy: LegionBotAI's CastHealAbility / MaintainBotBuff (plan step 4.3); beacons on
+            // the tank (Beacon of Faith, a talent, on the owner)
             {
                 65, SPELLFAMILY_PALADIN, CombatRole::Healer,
                 {
-                    { "Beacon of Light", Cond::AuraMissingOnTarget, 0.0f, 0, "Beacon of Light" },
-                    { "Holy Shock",      Cond::Always },
-                    { "Flash of Light",  Cond::TargetHealthPctBelow, 50.0f },
-                    { "Holy Light",      Cond::Always }
+                    { "Lay on Hands",     Cond::TargetHealthPctBelow, 25.0f },
+                    { "Beacon of Light",  Cond::AuraMissingOnTarget, 0.0f, 0, "Beacon of Light", StepTarget::Tank },
+                    { "Beacon of Faith",  Cond::AuraMissingOnTarget, 0.0f, 0, "Beacon of Faith", StepTarget::Owner },
+                    { "Light of Dawn",    Cond::InjuredNearSelf, 3.0f, 0, nullptr, StepTarget::RoleDefault, 15.0f },
+                    { "Holy Shock",       Cond::TargetHealthPctBelow, 75.0f },
+                    { "Flash of Light",   Cond::TargetHealthPctBelow, 55.0f },
+                    { "Bestow Faith",     Cond::TargetHealthPctBelow, 85.0f },
+                    { "Holy Light",       Cond::Always },
+                    { "Flash of Light",   Cond::Always }        // low levels, before Holy Light is learned
                 },
                 nullptr, "Cleanse"
             },
@@ -254,15 +261,21 @@ namespace BotRotations
                     { "Mind Flay",         Cond::Always }
                 }
             },
-            // Priest Holy
+            // Priest Holy: LegionBotAI's CastHealAbility / MaintainBotBuff (plan step 4.3) instead of
+            // AshamaneCore's three steps; Purify is Holy's dispel on 7.3.5 (Dispel Magic is offensive)
             {
                 257, SPELLFAMILY_PRIEST, CombatRole::Healer,
                 {
-                    { "Flash Heal", Cond::TargetHealthPctBelow, 40.0f },
-                    { "Renew",      Cond::AuraMissingOnTarget, 0.0f, 0, "Renew" },
-                    { "Heal",       Cond::Always }
+                    { "Guardian Spirit",      Cond::TargetHealthPctBelow, 25.0f },
+                    { "Prayer of Mending",    Cond::AuraMissingOnTarget, 0.0f, 0, "Prayer of Mending", StepTarget::Tank },
+                    { "Prayer of Healing",    Cond::InjuredNearTarget, 3.0f, 0, nullptr, StepTarget::RoleDefault, 15.0f },
+                    { "Holy Word: Serenity",  Cond::TargetHealthPctBelow, 75.0f },
+                    { "Flash Heal",           Cond::TargetHealthPctBelow, 55.0f },
+                    { "Renew",                Cond::AuraMissingOnTarget, 0.0f, 0, "Renew" },
+                    { "Heal",                 Cond::Always },
+                    { "Flash Heal",           Cond::Always }        // low levels, before Heal is learned
                 },
-                nullptr, "Dispel Magic"
+                nullptr, "Purify"
             },
             // Shaman Elemental
             {
@@ -575,7 +588,7 @@ namespace BotRotations
         return value;
     }
 
-    bool CheckCondition(Player* bot, Unit* target, RotationStep const& step)
+    bool CheckCondition(Player* bot, Unit* target, RotationStep const& step, std::vector<Player*> const& allies)
     {
         switch (step.cond)
         {
@@ -593,6 +606,10 @@ namespace BotRotations
                 return HasAuraNamed(bot, step.auxSpell);
             case Cond::AuraMissingOnTarget:
                 return target && !HasAuraNamed(target, step.auxSpell, bot->GetGUID());
+            case Cond::InjuredNearTarget:
+                return target && BotCombat::CountInjured(allies, target, step.radius) >= uint32(step.value);
+            case Cond::InjuredNearSelf:
+                return BotCombat::CountInjured(allies, bot, step.radius) >= uint32(step.value);
         }
         return false;
     }
@@ -609,6 +626,8 @@ namespace BotRotations
             case Cond::AuraMissingOnSelf:    snprintf(buffer, sizeof(buffer), "no %s on self", step.auxSpell); break;
             case Cond::AuraPresentOnSelf:    snprintf(buffer, sizeof(buffer), "%s on self", step.auxSpell); break;
             case Cond::AuraMissingOnTarget:  snprintf(buffer, sizeof(buffer), "no %s of mine on target", step.auxSpell); break;
+            case Cond::InjuredNearTarget:    snprintf(buffer, sizeof(buffer), "%.0f allies below 85%% within %.0f yd of target", step.value, step.radius); break;
+            case Cond::InjuredNearSelf:      snprintf(buffer, sizeof(buffer), "%.0f allies below 85%% within %.0f yd", step.value, step.radius); break;
             default:                         return "?";
         }
         return buffer;

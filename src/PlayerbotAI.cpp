@@ -41,6 +41,11 @@ namespace
     float const FollowAngle = float(M_PI);                  // behind the leader
     uint32 const CombatCheckInterval = 250;                 // ms between combat checks (one cast at most each)
     float const RangedDistance = 25.0f;                     // ranged roles chase to this distance
+    float const HealBelowPct = 90.0f;                       // healers heal allies below this
+    float const TankFirstBelowPct = 75.0f;                  // ... the tank first once it is below this
+    float const CriticalHealthPct = 40.0f;                  // triage: healed before interrupts and dispels
+    float const HealRange = 35.0f;                          // beyond it (or out of sight) a healer walks closer
+    float const HealApproachDistance = 15.0f;
 
     std::string Lower(std::string text)
     {
@@ -108,8 +113,9 @@ void PlayerbotAI::HandleGroupInvite(Player* bot)
 
 void PlayerbotAI::UpdateFollow(Player* bot)
 {
-    // combat owns the movement while engaged; moving would also break a cast
-    if (_engaged || bot->IsNonMeleeSpellCast(false))
+    // combat owns the movement while engaged (or a healer walks to its heal target); moving would also
+    // break a cast
+    if (_engaged || !_healMoveGuid.IsEmpty() || bot->IsNonMeleeSpellCast(false))
         return;
 
     Group* group = bot->GetGroup();
@@ -187,6 +193,7 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "stay")
     {
         _stay = true;
+        _healMoveGuid.Clear();
         _followGuid.Clear();
         bot->GetMotionMaster()->Clear();
         bot->GetMotionMaster()->MoveIdle();
@@ -955,6 +962,7 @@ void PlayerbotAI::UpdateCombat(Player* bot)
         if (_engaged)
             StopCombat(bot, "dead");
         _orderedTarget.Clear();
+        _healMoveGuid.Clear();
         return;
     }
 
@@ -1104,8 +1112,10 @@ void PlayerbotAI::StopCombat(Player* bot, char const* reason)
     _followTimer = FollowCheckInterval;
 }
 
-// AshamaneCore's ProcessBotCombatAI: interrupt, then dispel, then the first rotation step whose spell the
-// bot knows, whose condition holds and that BotCast accepts. One cast per check.
+// AshamaneCore's ProcessBotCombatAI with LegionBotAI's healer triage (plan step 4.3): an ally below
+// CriticalHealthPct is healed before anything else; otherwise interrupt, then dispel, then the first
+// rotation step whose spell the bot knows, whose condition holds and that BotCast accepts. One cast per
+// check.
 void PlayerbotAI::RunRotation(Player* bot, std::vector<Player*> const& members, BotRotations::CombatRole role, Unit* enemy)
 {
     BotRotations::SpecRotation const* rotation = BotRotations::GetRotation(bot->GetSpecializationId());
@@ -1117,7 +1127,10 @@ void PlayerbotAI::RunRotation(Player* bot, std::vector<Player*> const& members, 
     for (BotRotations::RotationStep const& step : rotation->steps)
         if (step.target == BotRotations::StepTarget::HealTarget)
             needsHealTarget = true;
-    Player* healTarget = needsHealTarget ? BotCombat::FindLowestHpAlly(bot, members, 90.0f, 75.0f, 90.0f) : nullptr;
+    Player* healTarget = needsHealTarget ? BotCombat::FindLowestHpAlly(bot, members, HealBelowPct, TankFirstBelowPct, HealBelowPct) : nullptr;
+
+    if (role == BotRotations::CombatRole::Healer)
+        MoveToHealTarget(bot, healTarget);
 
     if (!enemy && !healTarget && !rotation->dispel)
         return;
@@ -1132,7 +1145,72 @@ void PlayerbotAI::RunRotation(Player* bot, std::vector<Player*> const& members, 
             target ? target->GetName() : "", what);
     };
 
-    if (enemy && rotation->interrupt && BotCombat::GetInterruptibleCast(enemy))
+    // the group's tank on the bot's map (healers keep their beacons / Prayer of Mending on it), else the owner
+    Player* owner = FindOwner(members);
+    Player* tank = nullptr;
+    for (Player* member : members)
+        if (member != bot && member->IsAlive() && BotCombat::RoleOf(member) == BotCombat::BotRole::Tank)
+        {
+            tank = member;
+            break;
+        }
+    if (!tank && owner && owner->IsAlive())
+        tank = owner;
+
+    auto runSteps = [&]() -> bool
+    {
+        Unit* const roleTarget = role == BotRotations::CombatRole::Healer ? static_cast<Unit*>(healTarget) : enemy;
+        for (size_t i = 0; i < rotation->steps.size(); ++i)
+        {
+            BotRotations::RotationStep const& step = rotation->steps[i];
+            Unit* target = roleTarget;
+            switch (step.target)
+            {
+                case BotRotations::StepTarget::Enemy:      target = enemy; break;
+                case BotRotations::StepTarget::HealTarget: target = healTarget; break;
+                // buffs on the tank / owner only while there is something to fight or heal
+                case BotRotations::StepTarget::Tank:       target = (enemy || healTarget) ? tank : nullptr; break;
+                case BotRotations::StepTarget::Owner:      target = (enemy || healTarget) && owner && owner->IsAlive() ? owner : nullptr; break;
+                default: break;
+            }
+            if (!target)
+                continue;
+
+            uint32 const spellId = BotRotations::KnownSpell(bot, step.spell, rotation->family);
+            if (!spellId)
+            {
+                LogSkip(bot, i, step.spell, "not known");
+                continue;
+            }
+
+            if (!BotRotations::CheckCondition(bot, target, step, members))
+            {
+                LogSkip(bot, i, step.spell, "condition not met: " + BotRotations::DescribeCondition(step));
+                continue;
+            }
+
+            BotCombat::CastOutcome const outcome = BotCombat::BotCast(bot, target, spellId, _throttle);
+            if (outcome)
+            {
+                _lastSkip.erase(i);
+                logCast(spellId, target, "");
+                return true;
+            }
+
+            std::string reason = BotCombat::CastRefusalName(outcome.refusal);
+            if (outcome.refusal == BotCombat::CastRefusal::CastFailed)
+                reason += " (result " + std::to_string(uint32(outcome.result)) + ")";
+            LogSkip(bot, i, step.spell, reason);
+        }
+        return false;
+    };
+
+    // triage: a dying ally comes before interrupts and dispels
+    bool const critical = healTarget && healTarget->GetHealthPct() < CriticalHealthPct;
+    if (critical && runSteps())
+        return;
+
+    if (!critical && enemy && rotation->interrupt && BotCombat::GetInterruptibleCast(enemy))
         if (uint32 spellId = BotRotations::KnownSpell(bot, rotation->interrupt, rotation->family))
             if (BotCombat::BotCast(bot, enemy, spellId, _throttle))
             {
@@ -1148,44 +1226,41 @@ void PlayerbotAI::RunRotation(Player* bot, std::vector<Player*> const& members, 
                 return;
             }
 
-    Unit* const roleTarget = role == BotRotations::CombatRole::Healer ? static_cast<Unit*>(healTarget) : enemy;
-    for (size_t i = 0; i < rotation->steps.size(); ++i)
+    if (!critical)
+        runSteps();
+}
+
+// A healer whose heal target is out of reach (beyond HealRange or out of sight) walks towards it; follow
+// waits meanwhile and takes over again once the target is in reach or healed.
+void PlayerbotAI::MoveToHealTarget(Player* bot, Player* healTarget)
+{
+    bool const outOfReach = healTarget && healTarget != bot &&
+        (bot->GetDistance(healTarget) > HealRange || !bot->IsWithinLOSInMap(healTarget));
+
+    if (!outOfReach)
     {
-        BotRotations::RotationStep const& step = rotation->steps[i];
-        Unit* target = roleTarget;
-        if (step.target == BotRotations::StepTarget::Enemy)
-            target = enemy;
-        else if (step.target == BotRotations::StepTarget::HealTarget)
-            target = healTarget;
-        if (!target)
-            continue;
-
-        uint32 const spellId = BotRotations::KnownSpell(bot, step.spell, rotation->family);
-        if (!spellId)
+        if (!_healMoveGuid.IsEmpty())
         {
-            LogSkip(bot, i, step.spell, "not known");
-            continue;
+            _healMoveGuid.Clear();
+            _followGuid.Clear();                            // follow again at the next check
+            _followTimer = FollowCheckInterval;
         }
-
-        if (!BotRotations::CheckCondition(bot, target, step))
-        {
-            LogSkip(bot, i, step.spell, "condition not met: " + BotRotations::DescribeCondition(step));
-            continue;
-        }
-
-        BotCombat::CastOutcome const outcome = BotCombat::BotCast(bot, target, spellId, _throttle);
-        if (outcome)
-        {
-            _lastSkip.erase(i);
-            logCast(spellId, target, "");
-            return;
-        }
-
-        std::string reason = BotCombat::CastRefusalName(outcome.refusal);
-        if (outcome.refusal == BotCombat::CastRefusal::CastFailed)
-            reason += " (result " + std::to_string(uint32(outcome.result)) + ")";
-        LogSkip(bot, i, step.spell, reason);
+        return;
     }
+
+    if (_stay || bot->IsNonMeleeSpellCast(false))
+        return;
+
+    MotionMaster* motion = bot->GetMotionMaster();
+    if (_healMoveGuid == healTarget->GetGUID() && motion->GetCurrentMovementGeneratorType() == FOLLOW_MOTION_TYPE)
+        return;
+
+    _healMoveGuid = healTarget->GetGUID();
+    _followGuid.Clear();
+    motion->Clear();
+    motion->MoveFollow(healTarget, HealApproachDistance, 0.0f);
+    if (sPlayerbotMgr->GetCombatLog() >= 2)
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' moves to heal %s.", bot->GetName(), healTarget->GetName());
 }
 
 // log level 2: why a rotation step was skipped, once per change of reason

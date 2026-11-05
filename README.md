@@ -44,7 +44,9 @@ When you log out, the bots of your account (your alts) log out with you.
   it is turned in whatever the bot's own objectives). You can paste a quest link as the name.
 - **Combat**: bots never pull. They fight what attacks the group (or, by mode, only you and
   themselves), within 30 yards, after a short delay so you swing first; tanks and melee chase the
-  enemy, ranged stay at about 25 yards, healers stay with you and heal. Each spec casts a simple
+  enemy, ranged stay at about 25 yards, healers stay with you and heal (the lowest ally below 90%,
+  the tank first, a dying ally before anything else; they walk closer to someone out of reach and
+  keep beacons / Prayer of Mending on the tank). Each spec casts a simple
   priority list (all 36 specs, spell names looked up in the server's spell data). Orders:
   `attack` (your target, until it dies or you say `passive`), `passive` (stop fighting and fight
   nothing, not even what attacks the bot, until `attack` or `assist full|defend`), `assist
