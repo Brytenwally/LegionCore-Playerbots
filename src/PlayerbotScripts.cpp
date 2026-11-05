@@ -32,6 +32,7 @@ public:
     void OnStartup() override
     {
         BotRotations::Initialize();
+        BotFactory::CheckTalentBuilds();
         // the core's single-player dungeon finder makes a lone player's group at once: no time for the fill
         if (sPlayerbotMgr->IsEnabled() && sWorld->getBoolConfig(CONFIG_LFG_DEBUG_JOIN))
             TC_LOG_WARN("server.loading", "[mod-playerbots] DungeonFinder.DebugJoin = 1 in worldserver.conf: a player alone is sent "

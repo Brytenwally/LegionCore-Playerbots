@@ -19,6 +19,7 @@
 #include "ScriptMgr.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Timer.h"
 #include "QuestData.h"
 #include "QuestDef.h"
 #include "World.h"
@@ -513,9 +514,49 @@ namespace BotFactory
         return done;
     }
 
+    uint32 CheckTalentBuilds()
+    {
+        uint32 missing = 0;
+        for (TalentBuild const& build : TalentBuilds)
+        {
+            ChrSpecializationEntry const* spec = sChrSpecializationStore.LookupEntry(build.specId);
+            if (!spec)
+                continue;
+            for (uint8 tier = 0; tier < MAX_TALENT_TIERS; ++tier)
+            {
+                char const* wanted = build.names[tier];
+                if (!wanted)
+                    continue;
+                std::string present;
+                bool found = false;
+                for (TalentEntry const* talent : sTalentStore)
+                {
+                    if (talent->ClassID != spec->ClassID || talent->TierID != tier || (talent->SpecID && talent->SpecID != build.specId))
+                        continue;
+                    SpellInfo const* spell = sSpellMgr->GetSpellInfo(talent->SpellID);
+                    char const* name = spell && spell->SpellName ? spell->SpellName : "?";
+                    if (Lower(name) == Lower(wanted))
+                        found = true;
+                    present += std::string(present.empty() ? "" : ", ") + name;
+                }
+                if (found)
+                    continue;
+                ++missing;
+                TC_LOG_ERROR("server.loading", "[mod-playerbots] Talent build of %s (spec %u), row %u: no talent '%s' on this core; the row has: %s.",
+                    SpecName(build.specId).c_str(), build.specId, uint32(tier + 1), wanted, present.empty() ? "nothing" : present.c_str());
+            }
+        }
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Talent builds: %u specs, %u name(s) not found on this core (those rows get a random talent).",
+            uint32(std::size(TalentBuilds)), missing);
+        return missing;
+    }
+
     std::string InitializeNewBot(Player* bot, CreateRequest const& request)
     {
+        // each step's time is logged: the owner saw 1-2 s freezes when some bots were set up (build #24)
+        uint32 const start = getMSTime();
         CompleteStartingZones(bot);
+        uint32 const zonesDone = getMSTime();
 
         if (request.level > bot->getLevel())
         {
@@ -530,11 +571,14 @@ namespace BotFactory
         if (spec)
             bot->ForceChangeTalentGroup(spec);
 
+        uint32 const levelDone = getMSTime();
         uint32 const talents = FillTalents(bot);
+        uint32 const talentsDone = getMSTime();
 
         BotGear::Options options = sPlayerbotMgr->GetGearOptions();
         options.destroyReplaced = true;                     // a new character's starting gear
         BotGear::Result const gear = BotGear::AutoGear(bot, options);
+        uint32 const gearDone = getMSTime();
 
         bot->SetFullHealth();
         for (uint8 i = 0; i < MAX_POWERS; ++i)
@@ -544,6 +588,10 @@ namespace BotFactory
         bot->SaveToDB();
         if (request.teleport)
             bot->TeleportTo(request.location);
+        uint32 const end = getMSTime();
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' setup took %u ms: starting zones %u, level and spec %u, talents %u, gear %u, save %u.",
+            bot->GetName(), getMSTimeDiff(start, end), getMSTimeDiff(start, zonesDone), getMSTimeDiff(zonesDone, levelDone),
+            getMSTimeDiff(levelDone, talentsDone), getMSTimeDiff(talentsDone, gearDone), getMSTimeDiff(gearDone, end));
 
         char buffer[256];
         snprintf(buffer, sizeof(buffer), "Level %u %s %s, %u talent(s), %u item(s) equipped.", uint32(bot->getLevel()),

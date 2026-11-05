@@ -100,6 +100,10 @@ namespace BotFactory
     // Fills each empty unlocked talent row (a row with a talent keeps it: owner's rule, alts included).
     // Returns the number of talents learned. Not in combat (Player::LearnTalent refuses).
     uint32 FillTalents(Player* bot);
+    // At startup: every talent build name checked against this core's Talent.db2 (the builds are the owner's
+    // 7.0 guides; 7.3.5 renamed or moved some talents). Each missing name is logged with the talents its row
+    // really has. Returns the number of missing names.
+    uint32 CheckTalentBuilds();
     // "Spec: Frost. Talents: 15 Frozen Touch, 30 ..." for the talents order
     std::string DescribeTalents(Player* bot);
 }

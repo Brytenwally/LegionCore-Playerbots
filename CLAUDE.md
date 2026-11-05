@@ -612,6 +612,11 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   shaman bot sometimes crashed the server on initialization (log ended with `Talent build of spec 263: no
   talent 'Boulderfist' in row 1` and `initialized: Level 16 Enhancement Shaman`; crash dump asked for).
   Loot rolls not tested (most Legion loot is personal). Fixes in the commit after.
+  Owner then: the shaman "crash" is a **1-2 s freeze**, not a crash; he thinks it comes from the talent build,
+  whose names are from **7.0** guides (7.3.5 renamed or moved talents, e.g. Enhancement's Boulderfist). Not
+  proven: `CheckTalentBuilds` (startup) now logs every build name missing from this core with the names its
+  row really has (send that log to fix the table), and `InitializeNewBot` logs each step's time (`setup took
+  N ms: starting zones, level and spec, talents, gear, save`) to find what freezes.
 
 ## Checking
 
