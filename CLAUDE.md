@@ -177,6 +177,8 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
 
 ## Combat (plan steps 4.1 + 4.2, 2026-11-05, not yet tested on the server)
 
+Built on Windows in LegionCore-Build run #17 (core `1da7859` + `8599f44`); runtime untested.
+
 - `PlayerbotAI::UpdateCombat` every 250 ms on the bot's thread (before follow; `UpdateFollow` does
   nothing while `_engaged` or casting, since movement would break a cast).
 - Target (`SelectTarget`, LegionBotAI's rules): an `attack`-ordered target first (the owner's
