@@ -222,6 +222,24 @@ server** (see Status, 2026-11-05).
   re-pathing. Fix: `BotCast` calls `StopMoving()` before a cast-time / channelled spell (movement
   generators then wait while casting, `IsMovementPreventedByCasting`), and ranged bots stop
   chasing once in reach. **Rule: a bot must stand still before any non-instant cast.**
+  **That fix was not enough** (owner's log, build #20: tank / healer / warlock party, still result 72
+  on Unstable Affliction, Drain Soul and the healer's Flash Heal, plus 97 and 115, and 153 for the
+  tank). Real cause: `BotCast` faced its target with `Unit::SetFacingToObject` -> `SetFacingTo`,
+  which **launches a spline** (`MoveSplineInit::MoveTo` on the spot + `SetFacing`), and
+  `MoveSplineInit::Launch` sets `MOVEMENTFLAG_FORWARD`: the bot "moves" right before every cast,
+  so every cast-time spell fails 72; and `SetFacingToObject` does nothing while the bot moves
+  (`!IsStopped()`), hence 153 `SPELL_FAILED_UNIT_NOT_INFRONT` for the chasing tank. Fix in
+  `BotCast`: set the server orientation directly (`SetOrientation(GetAngle(target))`, what
+  `Spell::CheckCast` reads), tell clients with `SetFacingTo` only when standing, and for cast-time /
+  channelled spells `StopMoving()` and then `RemoveUnitMovementFlag(MOVEMENTFLAG_MASK_MOVING)` just
+  before `CastSpell`. **Rule: never let a facing spline precede a cast; clear the moving flags last.**
+  Also new refusals checked before casting: `NoCharges` (`Player::HasChargesForSpell`; charge spells
+  like Judgment / Holy Word: Serenity have no cooldown while recharging -> result 97
+  `SPELL_FAILED_NO_CHARGES_REMAIN`), `OutOfRange` (`GetMaxRange(friendly, bot)`; melee-range spells,
+  `GetMisc()->RangeEntry->Flags & SPELL_RANGE_MELEE`, by `IsWithinMeleeRange`; others
+  `IsWithinDistInMap`) and `NoLineOfSight`, so a chasing melee bot no longer logs 115
+  (`SPELL_FAILED_OUT_OF_RANGE`) every check. Results seen so far: 72 moving, 97 no charges, 115 out
+  of range, 153 not in front.
 - Owner's design rules (2026-11-05, after testing build #17): **`follow` does not interfere with
   a fight** (it no longer clears the ordered target; combat keeps the movement while engaged);
   **`passive`** (= `assist passive`) makes the bot passive towards enemies: it stops its fight at

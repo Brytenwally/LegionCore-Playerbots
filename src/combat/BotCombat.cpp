@@ -13,6 +13,7 @@
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "SpellTargetInfo.h"
 #include "Timer.h"
 #include <algorithm>
 
@@ -49,6 +50,9 @@ namespace BotCombat
             case CastRefusal::Level:          return "level too low";
             case CastRefusal::NotLearned:     return "not learned";
             case CastRefusal::Cooldown:       return "on cooldown";
+            case CastRefusal::NoCharges:      return "no charges left";
+            case CastRefusal::OutOfRange:     return "out of range";
+            case CastRefusal::NoLineOfSight:  return "not in sight";
             case CastRefusal::GlobalCooldown: return "global cooldown";
             case CastRefusal::Casting:        return "already casting";
             case CastRefusal::Throttled:      return "AI delay";
@@ -94,6 +98,10 @@ namespace BotCombat
             return refuse(CastRefusal::NotLearned);
         if (bot->HasSpellCooldown(spellId))
             return refuse(CastRefusal::Cooldown);
+        // charge spells (Judgment, Holy Word: Serenity...) have no cooldown while charges recharge
+        // (owner's log: result 97, SPELL_FAILED_NO_CHARGES_REMAIN)
+        if (!bot->HasChargesForSpell(spellInfo))
+            return refuse(CastRefusal::NoCharges);
         if (bot->GetGlobalCooldownMgr().HasGlobalCooldown(spellInfo))
             return refuse(CastRefusal::GlobalCooldown);
         if (bot->IsNonMeleeSpellCast(false))
@@ -103,15 +111,44 @@ namespace BotCombat
         if (throttle.IsThrottled(spellId, now))
             return refuse(CastRefusal::Throttled);
 
-        // A spell with a cast time or a channel fails with SPELL_FAILED_MOVING while the bot's movement
-        // flags say it moves (owner's log 2026-11-05: Unstable Affliction / Drain Soul, result 72, while
-        // a ranged bot chased its target). Stop first; chase and follow wait while the bot casts
-        // (IsMovementPreventedByCasting).
-        if ((spellInfo->IsChanneled() || spellInfo->CalcCastTime(bot) > 0) && (bot->isMoving() || !bot->IsStopped()))
+        // range and sight first, so a chasing melee bot does not log result 115 (SPELL_FAILED_OUT_OF_RANGE)
+        // on every check while it closes in
+        if (target != bot)
+        {
+            float const maxRange = spellInfo->GetMaxRange(bot->IsFriendlyTo(target), bot);
+            if (maxRange > 0.0f)
+            {
+                SpellRangeEntry const* rangeEntry = spellInfo->GetMisc()->RangeEntry;
+                bool const melee = rangeEntry && (rangeEntry->Flags & SPELL_RANGE_MELEE);
+                if (melee ? !bot->IsWithinMeleeRange(target) : !bot->IsWithinDistInMap(target, maxRange))
+                    return refuse(CastRefusal::OutOfRange);
+            }
+            if (!bot->IsWithinLOSInMap(target))
+                return refuse(CastRefusal::NoLineOfSight);
+        }
+
+        bool const hasCastTime = spellInfo->IsChanneled() || spellInfo->CalcCastTime(bot) > 0;
+        if (hasCastTime && !bot->IsStopped())
             bot->StopMoving();
 
+        // Facing: the server's orientation is set directly (Spell::CheckCast tests it; result 153,
+        // SPELL_FAILED_UNIT_NOT_INFRONT, came from Unit::SetFacingToObject doing nothing while the bot
+        // moved), and the clients are told with SetFacingTo only when the bot stands still.
         if (target != bot)
-            bot->SetFacingToObject(target);
+        {
+            float const angle = bot->GetAngle(target);
+            bot->SetOrientation(angle);
+            if (bot->IsStopped())
+                bot->SetFacingTo(angle);
+        }
+
+        // Unit::SetFacingTo launches a spline (MoveSplineInit::Launch adds MOVEMENTFLAG_FORWARD), and
+        // a spline that ended can leave the flags behind; Spell::prepare then refuses any cast-time or
+        // channelled spell with SPELL_FAILED_MOVING (owner's logs 2026-11-05, result 72, on Unstable
+        // Affliction, Drain Soul and Flash Heal while instants worked). The bot stands still here, so
+        // its moving flags go.
+        if (hasCastTime)
+            bot->RemoveUnitMovementFlag(MOVEMENTFLAG_MASK_MOVING);
 
         outcome.result = bot->CastSpell(target, spellInfo, false);
         if (outcome.result != SPELL_CAST_OK)

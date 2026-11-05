@@ -51,7 +51,10 @@ namespace BotCombat
         Level,              // spell level above the bot's
         NotLearned,
         Cooldown,
+        NoCharges,          // a charge spell with every charge spent
         GlobalCooldown,
+        OutOfRange,
+        NoLineOfSight,
         Casting,            // already casting or channelling
         Throttled,          // the AI's own per-spell delay (SpellThrottle)
         CastFailed          // the core refused it: see CastOutcome::result
