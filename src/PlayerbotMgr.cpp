@@ -39,6 +39,8 @@ void PlayerbotMgr::LoadConfig()
     _engageRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Combat.EngageRange", 30.0f));
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
     _selfGMOnly = sConfigMgr->GetBoolDefault("Playerbots.Self.GMOnly", true);
+    _useApl = sConfigMgr->GetBoolDefault("Playerbots.Rotation.SimC", true);
+    _aplDirectory = sConfigMgr->GetStringDefault("Playerbots.Rotation.Directory", "playerbots_apl");
     _loot.randomBotsRoll = sConfigMgr->GetBoolDefault("Playerbots.Loot.RandomBotsRoll", true);
     _defaultCo = sConfigMgr->GetStringDefault("Playerbots.Strategies.Combat", "tank,defensives,potions");
     _defaultNc = sConfigMgr->GetStringDefault("Playerbots.Strategies.NonCombat", "follow,loot,rest,roll,autoequip,talents");

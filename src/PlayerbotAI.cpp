@@ -183,6 +183,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         _combatTimer = 0;
         UpdateCombat(bot);
     }
+    UpdatePrecombat(bot, diff);
 
     _followTimer += diff;
     if (_followTimer >= FollowCheckInterval)
@@ -1598,8 +1599,34 @@ void PlayerbotAI::RunRotation(Player* bot, std::vector<Player*> const& members, 
                 return;
             }
 
-    if (!critical)
-        runSteps();
+    if (critical)
+        return;
+
+    // the spec's SimC profile (owner, 2026-11-05) instead of the step list; healers keep their lists
+    if (enemy && role != BotRotations::CombatRole::Healer && sPlayerbotMgr->UseApl() && BotApl::HasProfile(bot->GetSpecializationId()))
+    {
+        std::string fired;
+        if (BotApl::Run(bot, enemy, _apl, _throttle, BotApl::Normalize(rotation->interrupt ? rotation->interrupt : ""), fired) && log >= 1)
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' casts %s on %s.", bot->GetName(),
+                fired.size() > 200 ? (fired.substr(0, 200) + "...").c_str() : fired.c_str(), enemy->GetName());
+        return;
+    }
+
+    runSteps();
+}
+
+void PlayerbotAI::UpdatePrecombat(Player* bot, uint32 diff)
+{
+    _aplPrecombatTimer += diff;
+    if (_aplPrecombatTimer < 2000)
+        return;
+    _aplPrecombatTimer = 0;
+    if (!sPlayerbotMgr->UseApl() || !BotApl::HasProfile(bot->GetSpecializationId()) || !bot->IsAlive() || bot->isInCombat() ||
+        _groupInFight || _resting || !_lootTarget.IsEmpty() || bot->IsMounted() || bot->IsNonMeleeSpellCast(false))
+        return;
+    std::string fired;
+    if (BotApl::Run(bot, nullptr, _apl, _throttle, std::string(), fired) && sPlayerbotMgr->GetCombatLog() >= 1)
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' casts %s (out of combat).", bot->GetName(), fired.c_str());
 }
 
 // A healer whose heal target is out of reach (beyond HealRange or out of sight) walks towards it; follow

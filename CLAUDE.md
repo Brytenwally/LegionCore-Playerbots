@@ -594,6 +594,55 @@ one of these three at a time), `tank`, `defensives`, `potions`. Non-combat: `fol
   handler), quest items / currencies always, other items from `Playerbots.Loot.MinQuality` (0 = all), then
   `StoreLootItem(slot, loot)`, `GetGoldFromLoot`, `DoLootRelease`. Follow waits while `_lootTarget` is set.
 
+## SimC rotations and talents (2026-11-05, untested)
+
+Owner's request: SimulationCraft's T21 profiles (his `merged_simc.txt`, 35 files) as rotations and talents.
+Owner's decisions: **only the default profile of each spec** (variants `_BoS`, `_RA`, `_Stomp`, `_DPS`, `_Exsg`,
+`_SnD`, `_DfA` and the base `T21_Warlock.simc` left out); built into the module, a folder may override;
+**`artifact.*` counts as learned** (artifacts come later; under-performing until then is fine for leveling);
+gear / set bonus / trinket terms count as false; a spec that plainly fails without them is fixed by hand.
+Specs without a profile (Holy / Disc Priest, Holy Paladin, Resto Druid / Shaman, Mistweaver, Protection Warrior,
+Vengeance) keep the module's own lists, to be done by hand later.
+- `tools/simc_to_apl.py <merged file or folder>`: keeps each default profile's `talents=` and `actions` lines
+  (spec id from the file name table in the script) -> `apl/<Class>_<Spec>.simc` (with a `spec_id=` line) and the
+  generated `src/combat/AplProfiles.cpp` (one string literal per line: MSVC limits single literals to ~16 KB).
+  28 specs, 31-139 action lines each.
+- `src/combat/BotApl.*`, the interpreter. Startup (`OnStartup` -> `BotApl::Initialize(Playerbots.Rotation.
+  Directory)`): parses every profile once (lines `actions[.list](+)=a,opt=v/b...`, actions split on `/`, options on
+  `,`), then files of the folder (`spec_id=` or SimC class + `spec=` lines) replace their spec's profile; one scan
+  of the spell store indexes every spell name the profiles use (normalized: lower-case letters and digits, so
+  `templars_verdict` = "Templar's Verdict"). Log per spec: lists, actions, talents, names no spell carries, terms
+  read as 0 (`Rotation X: terms read as 0: ...`): that log is the to-do list for the next fixes.
+- Expressions: SimC precedence (`|` < `^` < `&` < comparisons < `+ -` < `* % %%` < unary `! - @`, **`%` divides,
+  `%%` is modulo**), `floor()`/`ceil()`. Terms (`MakeTerm`): resources (cur / max / deficit / pct / regen /
+  time_to_max, displayed units), runes and `rune.time_to_N`, `cp_max_spend`; `buff.X` on the bot (passive auras
+  skipped: talents share names with their procs; `buff.arcane_charge` = the Arcane Charges power); `debuff.X` /
+  `dot.X` the bot's own aura on the target (refreshable = under 30% left); `active_dot.X`; `cooldown.X` /
+  `action.X` (remains, ready, charges, recharge...; charge spells by `SpellCategory.ChargeRecoveryTime`);
+  `talent.X.enabled` (the bot's talent map by spell name); `spell_targets` / `active_enemies` (hostile units in
+  combat within 40 yd of the bot, 8 yd of the target); `target.health.pct`, `target.time_to_die` (health lost
+  since the bot took that target, 300 until 2 s of data); `health.*`, `gcd` (1 s for energy users, else 1.5 x
+  haste, min 0.75), `time` (since combat start), `cast_time`, `execute_time`, bare `remains` / `refreshable` /
+  `charges` ... = the action's own spell; `prev_gcd.N.X`; `variable.X`; `stealthed.*`; `pet.X.active`; `race.X`;
+  `incoming_damage_Ns` (own health drops, 10 s kept); Arcane's `burn_phase(_duration)`. Constants: `artifact.*`
+  1, `equipped` / `set_bonus` / `trinket` 0, `raid_event.*.in` 10000, `moving` 0. Anything else is 0 (logged).
+- Running (`BotApl::Run` from `RunRotation`, after triage / interrupt / dispel, when `Playerbots.Rotation.SimC`,
+  a profile exists and the role is not healer): the main list in order; `call_action_list` / `run_action_list`
+  (`name=`, `if=`), `variable` (set, add, sub, mul, div, min, max, reset, setif, floor, ceil; variables reset at
+  each combat start), `start/stop_burn_phase`; a spell action casts the first spell of that name the bot knows
+  (class family first) whose `if=` (and a plain `target_if=`) holds, `line_cd`, `sync`; positive spells and
+  spells without an explicit target are cast on the bot. Skipped: auto attack / shot, items, potions, flasks,
+  pooling, waits, movement spells (`charge`, `fel_rush`, `heroic_leap`...), `moving=1` lines, target selection
+  (`target_if=min:`, `cycle_targets`), and the spec's interrupt (left to the interrupt code). `BotCast` with a 0.5 s
+  per-spell throttle (the old lists used 1.5 s, too slow for 1 s global cooldowns). Cast log: `casts Spell (id),
+  list: action text on Target`.
+- Out of combat (`UpdatePrecombat`, every 2 s, not resting / looting / mounted): the `precombat` list's
+  positive self spells not already up, `summon_pet` (hunter Call Pet 1, warlock `Summon <name>`) and
+  `apply_poison` (`<lethal> Poison`); no `stealth` / `prowl` while following.
+- Talents: `FillTalents` takes the profile's `talents=` digit for a row (column 1-3; 0 = the old name table);
+  startup logs each profile's talents by name (`SimC talents of X (spec N): 1302002: ...`).
+- Config: `Playerbots.Rotation.SimC` (1), `Playerbots.Rotation.Directory` ("playerbots_apl").
+
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
 Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.

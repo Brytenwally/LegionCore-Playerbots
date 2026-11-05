@@ -4,6 +4,7 @@
 
 #include "BotFactory.h"
 #include "AccountMgr.h"
+#include "BotApl.h"
 #include "BotGear.h"
 #include "BotTalents.h"
 #include "CharacterData.h"
@@ -25,6 +26,7 @@
 #include "World.h"
 #include "WorldSession.h"
 #include <algorithm>
+#include <cstring>
 #include <cctype>
 #include <mutex>
 #include <map>
@@ -520,6 +522,36 @@ namespace BotFactory
 
     uint32 CheckTalentBuilds()
     {
+        // the SimC profiles' talents, row by row, as this core's Talent.db2 names them
+        for (ChrSpecializationEntry const* spec : sChrSpecializationStore)
+        {
+            char const* simc = BotApl::TalentString(spec->ID);
+            if (!simc)
+                continue;
+            std::string names;
+            for (uint8 tier = 0; tier < MAX_TALENT_TIERS && simc[tier]; ++tier)
+            {
+                std::string name = "-";
+                if (simc[tier] >= '1' && simc[tier] <= '3')
+                {
+                    name = "?";
+                    uint8 const column = uint8(simc[tier] - '1');
+                    for (TalentEntry const* talent : sTalentStore)
+                        if (talent->ClassID == spec->ClassID && talent->TierID == tier && talent->ColumnIndex == column &&
+                            (!talent->SpecID || talent->SpecID == spec->ID))
+                            if (SpellInfo const* info = sSpellMgr->GetSpellInfo(talent->SpellID))
+                            {
+                                name = info->SpellName ? info->SpellName : "?";
+                                if (talent->SpecID == spec->ID)
+                                    break;
+                            }
+                }
+                names += (tier ? ", " : "") + name;
+            }
+            TC_LOG_INFO("server.loading", "[mod-playerbots] SimC talents of %s (spec %u): %s: %s.", SpecName(spec->ID).c_str(),
+                spec->ID, simc, names.c_str());
+        }
+
         uint32 missing = 0;
         for (TalentBuild const& build : TalentBuilds)
         {
@@ -647,6 +679,14 @@ namespace BotFactory
             // the spec's build (owner's Talents.txt); a name missing from the row on this core is logged once
             // and the row gets a random column, as for specs with no build (warriors, demon hunters)
             uint32 const spec = bot->GetSpecializationId();
+            // the spec's SimC profile first (owner, 2026-11-05): its talents= digit is the row's column, 0 = none
+            if (char const* simc = BotApl::TalentString(spec))
+                if (std::strlen(simc) > tier && simc[tier] >= '1' && simc[tier] <= '3')
+                    if (uint32 talent = BotTalents::TalentAt(bot, tier, uint8(simc[tier] - '1')))
+                    {
+                        picks[tier] = talent;
+                        continue;
+                    }
             if (char const* name = BuildTalentName(spec, tier))
             {
                 if (uint32 talent = TalentNamed(bot, tier, name))

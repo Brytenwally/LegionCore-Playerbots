@@ -316,3 +316,28 @@ Playerbots.Aggressive.MaxLevelAbove = 6
 
 Playerbots.Loot.MinQuality = 0
 Playerbots.Loot.Range = 30
+
+###################################################################################################
+# ROTATIONS (SimulationCraft action lists)
+###################################################################################################
+
+#
+#    Playerbots.Rotation.SimC
+#        1: specs with a SimulationCraft profile (the T21 default profile of 28 specs, built into
+#        the module) fight with its action list and take its talents; the other specs (most
+#        healers, Protection Warrior, Vengeance) keep the module's own lists. 0: every spec uses
+#        the module's own lists. Artifact conditions count as learned, gear and set bonus ones as
+#        absent. At startup each profile logs what it could not resolve.
+#        Default: 1
+
+Playerbots.Rotation.SimC = 1
+
+#
+#    Playerbots.Rotation.Directory
+#        A folder (relative to the worldserver's working folder, or absolute) whose .simc files
+#        replace the built-in profile of their spec at startup: the module's own apl/*.simc files
+#        (spec_id= line) or plain SimulationCraft profiles (class and spec= lines). Missing folder =
+#        built-in profiles only.
+#        Default: "playerbots_apl"
+
+Playerbots.Rotation.Directory = "playerbots_apl"

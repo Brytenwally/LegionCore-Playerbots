@@ -12,6 +12,7 @@
 #include "Group.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
+#include "BotApl.h"
 #include "BotRotations.h"
 #include "PlayerbotAI.h"
 #include "PlayerbotMgr.h"
@@ -32,6 +33,7 @@ public:
     void OnStartup() override
     {
         BotRotations::Initialize();
+        BotApl::Initialize(sPlayerbotMgr->GetAplDirectory());
         BotFactory::CheckTalentBuilds();
         // the core's single-player dungeon finder makes a lone player's group at once: no time for the fill
         if (sPlayerbotMgr->IsEnabled() && sWorld->getBoolConfig(CONFIG_LFG_DEBUG_JOIN))

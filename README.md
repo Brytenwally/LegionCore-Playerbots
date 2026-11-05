@@ -66,6 +66,9 @@ When you log out, the bots of your account (your alts) log out with you.
   `bot tank`) switch the same strategies. Defaults in `Playerbots.Strategies.*`.
 - **Dead groups**: once a minute a bot checks its group; with no player online in it for two checks in
   a row it leaves (a random bot is reset and returns to GM Island).
+- **Rotations**: 28 specs fight with SimulationCraft's T21 action lists and take their talents (built
+  in; `.simc` files in `Playerbots.Rotation.Directory` replace them). The startup log tells, per spec,
+  what could not be read. Most healers, Protection Warrior and Vengeance keep the module's own lists.
 - **Formations**: `formation` shows the current one, `formation <name>` sets it: `role` (default:
   tank ahead at your side, melee rear left, ranged rear right, healer behind), `near`, `line`,
   `queue`, `circle`, `arrow`, `shield`, `chaos`, `far` (`Playerbots.Formation.Default`).

@@ -60,6 +60,9 @@ public:
     };
     SurvivalOptions const& GetSurvivalOptions() const { return _survival; }
     BotFormation::Shape GetDefaultFormation() const { return _defaultFormation; }
+    // SimC rotations (Playerbots.Rotation.*)
+    bool UseApl() const { return _useApl; }
+    std::string const& GetAplDirectory() const { return _aplDirectory; }
 
     // loot rolls and equipping from the bags (owner's rules, 2026-11-05)
     struct LootOptions
@@ -238,6 +241,8 @@ private:
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _selfAis;  // self-bots by player guid, same lock
     std::atomic<uint32> _selfCount{ 0 };                    // skips the lookup for every client update while 0
     bool _selfGMOnly = true;
+    bool _useApl = true;
+    std::string _aplDirectory = "playerbots_apl";
     BotFormation::Shape _defaultFormation = BotFormation::Shape::Role;
     BotGear::Options _gearOptions;
     BotFactory::CreateConfig _createConfig;

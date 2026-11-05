@@ -18,6 +18,7 @@
 #include "BotFactory.h"
 #include "BotGear.h"
 #include "BotFormation.h"
+#include "BotApl.h"
 #include "LFG.h"
 #include <map>
 #include <set>
@@ -165,6 +166,10 @@ private:
     void UpdateLoot(Player* bot);
     void LootCorpse(Player* bot, Creature* corpse);
     ObjectGuid _lootTarget;
+    BotApl::State _apl;                                     // the SimC rotation's per-bot state
+    uint32 _aplPrecombatTimer = 0;
+    // out of combat: the SimC profile's precombat self buffs and pet summons (every 2 s)
+    void UpdatePrecombat(Player* bot, uint32 diff);
     uint32 _lootStarted = 0;
     uint32 _corpseTimer = 0;
     std::set<ObjectGuid> _lootedCorpses;
