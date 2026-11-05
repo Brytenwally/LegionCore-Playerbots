@@ -118,6 +118,8 @@ public:
     };
     std::vector<BotInfo> ListBots() const;
 
+    // a bot character (not a self-bot), from any thread
+    bool IsBot(ObjectGuid const& guid) const;
     // the bot's AI, from any thread (the AI itself is used on the bot's own map thread only)
     std::shared_ptr<PlayerbotAI> GetAI(ObjectGuid const& bot) const;
     // the bots this player owns (PlayerbotAI::IsMaster), from any thread
@@ -138,7 +140,8 @@ private:
     // dungeons, so other players may queue first.
     struct QueueReport
     {
-        ObjectGuid queuer;
+        ObjectGuid queuer;                                  // the reporting player: the fill bots' master
+        ObjectGuid key;                                     // his group (one fill per group), or himself
         uint32 queueId = 0;
         uint8 level = 0;
         uint32 team = 0;
@@ -186,6 +189,7 @@ private:
         std::shared_ptr<BotFactory::CreateRequest> init;    // a created bot, initialized once in the world
         bool toGMIsland = false;                            // a pool bot logged in at startup: waits on GM Island
         int32 ownerGoneTimer = -1;                          // ms until logout after its owner logged out, -1 = none
+        uint32 restUntil = 0;                               // getMSTime: a released bot is not used to fill a queue before
     };
     // ".playerbots create": an idle logged-in pool bot, else an offline bot character, of the class and the
     // creator's faction and at most his level; false when there is none (a new one is made)

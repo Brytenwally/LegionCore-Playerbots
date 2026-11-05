@@ -144,6 +144,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
 
     HandleGroupInvite(bot);
     CheckOwnerGroup(bot, diff);
+    CheckPlayerlessGroup(bot, diff);
 
     // owner's decision: talents are learned automatically, alts included, into empty rows only
     _talentTimer += diff;
@@ -1739,7 +1740,9 @@ void PlayerbotAI::AutoGearOrder(Player* bot, OrderSender const& sender)
     }
 
     BotGear::Result const result = BotGear::AutoGear(bot, sPlayerbotMgr->GetGearOptions());
-    std::string text = result.equipped ? "Equipped " + std::to_string(result.equipped) + " item(s)" : std::string("Nothing better found");
+    std::string text = result.equipped ? "Equipped " + std::to_string(result.equipped) + " item(s)" :
+        "Nothing better found (" + std::to_string(result.candidates) + " items allowed for me, item level cap " +
+        (result.itemLevelCap ? std::to_string(result.itemLevelCap) : std::string("none")) + ")";
     if (result.bagsAdded)
         text = "Added " + std::to_string(result.bagsAdded) + " bag(s). " + text;
     for (size_t i = 0; i < result.pieces.size() && i < 6; ++i)
@@ -1793,6 +1796,25 @@ void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
     Group* group = bot->GetGroup();
     if (!group)
         _leaveQueued = false;
+    // still in the group 5 s after the leave was sent: send it again (owner, build #26: bots of older builds
+    // stayed in dead groups, the single leave having been lost)
+    if (_leaveQueued && group)
+    {
+        _leaveRetryTimer += diff;
+        if (_leaveRetryTimer >= 5000)
+        {
+            _leaveRetryTimer = 0;
+            // what HandleLeaveGroup calls, on this (the bot's) thread
+            if (_randomBot && !group->isLFGGroup() && !group->IsMember(_master.IsEmpty() ? _pendingMaster : _master))
+            {
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves a party without its master (directly).", bot->GetName());
+                bot->RemoveFromGroup(GROUP_REMOVEMETHOD_LEAVE);
+                group = bot->GetGroup();
+            }
+            if (!group)
+                _leaveQueued = false;
+        }
+    }
 
     // the master, or the player whose invite a masterless random bot just accepted
     ObjectGuid const owner = !_master.IsEmpty() ? _master : _pendingMaster;
@@ -2094,9 +2116,19 @@ void PlayerbotAI::FinishDismiss(Player* bot, uint32 diff)
         _dismissTimer += diff;
         if (_dismissTries == 0 || _dismissTimer >= 3000)
         {
-            if (_dismissTries >= 5)
+            if (_dismissTries >= 2)
             {
-                TC_LOG_ERROR("server.loading", "[mod-playerbots] Bot '%s' could not leave its group; reset anyway.", bot->GetName());
+                // the packets did not make it: what HandleLeaveGroup itself calls, on this (the bot's) thread
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves its group directly.", bot->GetName());
+                bot->RemoveFromGroup(GROUP_REMOVEMETHOD_LEAVE);
+                if (bot->GetGroup() && _dismissTries < 5)
+                {
+                    ++_dismissTries;
+                    _dismissTimer = 0;
+                    return;
+                }
+                if (bot->GetGroup())
+                    TC_LOG_ERROR("server.loading", "[mod-playerbots] Bot '%s' could not leave its group; reset anyway.", bot->GetName());
             }
             else
             {
@@ -2605,4 +2637,55 @@ void PlayerbotAI::LootCorpse(Player* bot, Creature* corpse)
 
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' loots %s: %u item(s) taken, %u below the minimum quality left.",
         bot->GetName(), corpse->GetName(), taken, left);
+}
+
+// Owner's request (build #26): once a minute a bot looks at its group; two checks in a row (so a player has a
+// minute to come back) without any player in it, online and not a bot, and it leaves: a random bot is dismissed
+// (reset, GM Island), an alt just leaves. Catches every way a group can end up with bots only, beyond the
+// owner / master rules. Cheap: the member list and one lookup per member, once a minute per bot.
+void PlayerbotAI::CheckPlayerlessGroup(Player* bot, uint32 diff)
+{
+    uint32 const Interval = 60000;
+    _groupCheckTimer += diff;
+    if (_groupCheckTimer < Interval)
+        return;
+    _groupCheckTimer = 0;
+
+    Group* group = bot->GetGroup();
+    if (!group)
+    {
+        _playerlessChecks = 0;
+        return;
+    }
+
+    bool hasPlayer = false;
+    for (Group::MemberSlot const& slot : group->GetMemberSlots())
+    {
+        if (slot.Guid == bot->GetGUID() || sPlayerbotMgr->IsBot(slot.Guid))
+            continue;
+        if (ObjectAccessor::FindPlayer(slot.Guid))          // online: an existence check only
+        {
+            hasPlayer = true;
+            break;
+        }
+    }
+    if (hasPlayer)
+    {
+        _playerlessChecks = 0;
+        return;
+    }
+
+    if (++_playerlessChecks < 2)
+        return;
+    _playerlessChecks = 0;
+
+    if (_randomBot)
+    {
+        Dismiss(bot, "its group has no player");
+        return;
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves a group with no player in it.", bot->GetName());
+    WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
+    *packet << int8(0);
+    bot->GetSession()->QueuePacket(packet);
 }

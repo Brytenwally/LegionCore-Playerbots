@@ -222,6 +222,10 @@ private:
     bool _randomBot = false;
     ObjectGuid _pendingMaster;                              // a random bot that accepted a player's invite, until its new AI takes over
     bool _leaveQueued = false;                              // a random bot leaving a party without its master
+    uint32 _leaveRetryTimer = 0;                            // re-sends that leave: a packet can be lost (teleport)
+    uint32 _groupCheckTimer = 0;                            // the playerless group check (every minute)
+    uint32 _playerlessChecks = 0;
+    void CheckPlayerlessGroup(Player* bot, uint32 diff);
     bool _wasWithOwner = false;                             // has been in a group with its master
     bool _leftByOrder = false;                              // the "leave" order: no logout for that
     int32 _groupLogoutTimer = -1;                           // ms until logout, -1 = none

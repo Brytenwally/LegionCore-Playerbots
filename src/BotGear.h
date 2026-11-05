@@ -32,15 +32,12 @@ namespace BotGear
         // put in the empty bag slots before gearing (owner's rule); 0 = the first of BagFallbacks that exists
         uint32 bagEntry = 0;
 
-        // item level cap by bot level (owner's values, 2026-11-05; Playerbots.AutoGear.IlvlCap.*): below 60
-        // level + belowSixtyAdd, then level x the bracket's factor; 110 has only maxItemLevel
+        // Item level cap by bot level (Playerbots.AutoGear.IlvlCap.*): below 60 level + belowSixtyAdd; from 60
+        // brackets of 5 levels with a fixed item level each (owner, build #26: the level x factor formula gave
+        // odd caps, e.g. 158 at 79 but 224 at 80), indexed (level - 60) / 5: 60-64 ... 105-109; 0 = no cap;
+        // 110 has only maxItemLevel
         float belowSixtyAdd = 6.0f;
-        float factor60 = 1.3f;          // 60-69
-        float factor70 = 2.0f;          // 70-79
-        float factor80 = 2.8f;          // 80-84
-        float factor85 = 4.6f;          // 85-89
-        float factor90 = 5.8f;          // 90-99
-        float factor100 = 7.0f;         // 100-109
+        uint32 brackets[10] = { 100, 115, 165, 200, 285, 400, 560, 630, 735, 820 };
     };
 
     struct Result
@@ -48,8 +45,13 @@ namespace BotGear
         uint32 equipped = 0;
         uint32 noBagRoom = 0;           // upgrades skipped because the old piece did not fit in the bags
         uint32 bagsAdded = 0;
+        uint32 itemLevelCap = 0;        // the cap used (0 = none)
+        uint32 candidates = 0;          // items allowed for the bot (before comparing with what it wears)
         std::vector<std::string> pieces;// names of the items put on
     };
+
+    // the highest item level the bot may wear by its level and Options (0 = none)
+    uint32 ItemLevelCap(uint8 level, Options const& options);
 
     // value of the item for the bot's current spec at itemLevel (0 for an unknown spec)
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel);

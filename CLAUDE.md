@@ -85,6 +85,13 @@ come first.
     handled while the bot was between maps and lost. Now `FinishDismiss` (each update while `_dismissed`)
     re-queues the leave every 3 s (5 tries) and resets / teleports / releases only once `GetGroup()` is null.
     **Rule: a queued client packet is not done yet; never follow it in the same tick with a far teleport.**
+    After two lost tries `FinishDismiss` calls `Player::RemoveFromGroup(GROUP_REMOVEMETHOD_LEAVE)` itself (what
+    `HandleLeaveGroup` calls; the bot's own thread, as the handler).
+  - **Bots stuck in dead groups** (owner, build #26: bots of earlier builds stayed in bot-only groups): the
+    masterless leave rule sent its leave once (`_leaveQueued`) and never again. Now re-tried every 5 s, directly
+    (`RemoveFromGroup`). And `CheckPlayerlessGroup` (every 60 s, cheap: member list + `PlayerbotMgr::IsBot` +
+    an existence lookup per member): two checks in a row with no online non-bot player in the group (a player
+    has a minute to come back) -> a random bot is dismissed, an alt leaves.
 - GM commands: `.playerbots add <name>`, `remove <name>`, `removeall`, `list`. Need
   `Playerbots.Enable = 1`. Any character of any account; must not be online.
 
@@ -417,6 +424,16 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   TwoHand, melee for Ranged) counts as nothing held, in `AutoGear` (`wornHands` = 0) and `CompareToWorn`
   (weapon slots' old = 0), so the spec's own weapons always replace it. "Sometimes": pool bots reused in
   another spec kept their old two-hander.
+- **Item level brackets** (owner, build #26: about 1 bot in 10 kept a near end-game piece at a low level, and a
+  level 80 bot kept gear 10 levels below with "nothing better found"; the level x factor formula gave odd caps,
+  158 at 79 but 224 at 80). From 60, one item level per bracket of 5 levels (`Options::brackets`,
+  `Playerbots.AutoGear.IlvlCap.60` ... `.105`; defaults 100, 115, 165, 200, 285, 400, 560, 630, 735, 820, an
+  estimate of each range's dungeon / quest gear, the owner tunes them); below 60 level + 6; `MaxItemLevel`
+  caps every level (`ItemLevelCap`). The cap now applies everywhere an item is put on: autogear, equipping from
+  the bags and need rolls (`CompareToWorn` refuses items above it); a worn piece above it counts as nothing,
+  so any allowed piece replaces it (the strong pieces came in through bags / quest rewards / loot, which had
+  no cap). "Nothing better found" now says how many items were allowed and the cap. The level 80 case is not
+  explained yet: that message's numbers will tell (0 allowed items = filters, many = the worn pieces' score).
 - **Owner's requests after that test (2026-11-05):**
   - A created bot **joins its creator's party**: 3 s after its setup, `PlayerbotAI::SendCreatorInvite`
     queues `CMSG_PARTY_INVITE` on the creator's session (`sWorld->FindSession(creatorAccount)`,
@@ -540,6 +557,12 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     Finder with a single player": `LFGQueue` minimum group size 1): a lone player is sent to the dungeon at
     once, so the fill never gets its chance (owner, build #24: party bots queue correctly, pool bots never
     did). Owner sets it to 0; the module logs a warning at startup while it is on.
+  - **Replacement after a kick** (owner, build #26: vote kick or a bot told to `leave` -> the group queues again
+    for a replacement, but pool bots did not fill it): `OnClientUpdate` now also reports dungeon finder groups
+    (their leader may be a bot), from any player of the group, keyed by the group (`QueueReport::key`; a second
+    player of the same group only refreshes the fill). The replacement queue does not set the selection again:
+    an empty selection means the queue's own id. A released bot rests 5 min (`Bot::restUntil`, `ReleaseBot`)
+    before it may fill a queue, so the kicked bot is not sent back into the same group.
   - Not yet: raids / scenarios / LFR, boot votes, bots with no group after a dungeon whose queuer was not in
     it (matched with others; they keep that master), refilling a running dungeon.
 - Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
@@ -644,6 +667,13 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   proven: `CheckTalentBuilds` (startup) now logs every build name missing from this core with the names its
   row really has (send that log to fix the table), and `InitializeNewBot` logs each step's time (`setup took
   N ms: starting zones, level and spec, talents, gear, save`) to find what freezes.
+
+- 2026-11-05, owner's test of build #26 (core `560dd9e` + `9f11f1c`): **works**: autogear (two-handers for
+  shield / dual-wield specs fixed), follow out of combat only, all group chats, dungeon finder fill, `co`/`nc`
+  strategies, old orders, `aggressive`, `loot`. No freeze seen while creating shamans. **Problems**: bots from
+  older builds stuck in dead groups; no replacement filled after kicking a bot from a dungeon finder group;
+  item level caps (high pieces at low levels, poor gear at 80). Fixes in the commit after. The talent / setup
+  logs he meant to send did not arrive.
 
 ## Checking
 

@@ -76,12 +76,14 @@ void PlayerbotMgr::LoadConfig()
     _gearOptions.choices = std::max(1, sConfigMgr->GetIntDefault("Playerbots.AutoGear.Choices", 5));
     _gearOptions.bagEntry = sConfigMgr->GetIntDefault("Playerbots.AutoGear.BagEntry", 0);
     _gearOptions.belowSixtyAdd = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Below60Add", 6.0f);
-    _gearOptions.factor60 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor60", 1.3f);
-    _gearOptions.factor70 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor70", 2.0f);
-    _gearOptions.factor80 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor80", 2.8f);
-    _gearOptions.factor85 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor85", 4.6f);
-    _gearOptions.factor90 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor90", 5.8f);
-    _gearOptions.factor100 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor100", 7.0f);
+    {
+        BotGear::Options const defaults;
+        for (uint32 i = 0; i < 10; ++i)
+        {
+            std::string const key = "Playerbots.AutoGear.IlvlCap." + std::to_string(60 + i * 5);
+            _gearOptions.brackets[i] = uint32(std::max(0, sConfigMgr->GetIntDefault(key, int32(defaults.brackets[i]))));
+        }
+    }
 
     _createConfig.accountPrefix = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPrefix", "PLAYERBOT");
     _createConfig.accountPassword = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPassword", "playerbot");
@@ -661,6 +663,12 @@ void PlayerbotMgr::Update(uint32 diff)
     }
 }
 
+bool PlayerbotMgr::IsBot(ObjectGuid const& guid) const
+{
+    std::lock_guard<std::mutex> lock(_aiLock);
+    return _ais.find(guid) != _ais.end();
+}
+
 std::shared_ptr<PlayerbotAI> PlayerbotMgr::GetAI(ObjectGuid const& bot) const
 {
     std::lock_guard<std::mutex> lock(_aiLock);
@@ -776,9 +784,10 @@ void PlayerbotMgr::OnClientUpdate(Player* player, uint32 diff)
     if (!sLFGMgr->HasQueue(guid))
         return;
 
-    // a group's queue is its leader's; a dungeon finder group (already in its dungeon) is not filled
+    // a party's queue is its leader's; a dungeon finder group queueing again for a replacement (a member kicked
+    // or gone; its leader may be a bot) is reported by its players, one fill per group (owner, build #26)
     Group* group = player->GetGroup();
-    if (group && (group->isLFGGroup() || group->GetLeaderGUID() != guid))
+    if (group && !group->isLFGGroup() && group->GetLeaderGUID() != guid)
         return;
 
     std::vector<ObjectGuid> members;
@@ -799,11 +808,15 @@ void PlayerbotMgr::OnClientUpdate(Player* player, uint32 diff)
 
         QueueReport report;
         report.queuer = guid;
+        report.key = group ? group->GetGUID() : guid;
         report.queueId = queueId;
         report.level = player->getLevel();
         report.team = player->GetTeam();
         report.queued = state == lfg::LFG_STATE_QUEUED;
         report.dungeons = sLFGMgr->GetSelectedDungeons(guid, queueId);
+        // a dungeon finder group's replacement queue does not set the selection again: its queue's own dungeon
+        if (report.dungeons.empty() && group && group->isLFGGroup())
+            report.dungeons.insert(queueId);
         // each member counts once, for the scarcest role he offers
         for (ObjectGuid const& member : members)
         {
@@ -841,6 +854,7 @@ void PlayerbotMgr::ReleaseBot(ObjectGuid const& guid)
     Bot& bot = itr->second;
     bot.notifyGuid.Clear();
     bot.ownerGoneTimer = -1;
+    bot.restUntil = getMSTime() + 300000;               // 5 min before it fills a dungeon queue again
     std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(ObjectGuid::Empty, bot.session->GetAccountId(), true);
     {
         std::lock_guard<std::mutex> lock(_aiLock);
@@ -869,7 +883,14 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
     uint32 const now = getMSTime();
     for (QueueReport const& report : reports)
     {
-        LfgFill& fill = _lfgFills[std::make_pair(report.queuer, report.queueId)];
+        auto const fillKey = std::make_pair(report.key, report.queueId);
+        if (_lfgFills.count(fillKey) && _lfgFills[fillKey].report.queuer != report.queuer &&
+            getMSTimeDiff(_lfgFills[fillKey].lastSeen, now) < 5000)
+        {
+            _lfgFills[fillKey].lastSeen = now;              // another player of the same group: one fill per group
+            continue;
+        }
+        LfgFill& fill = _lfgFills[fillKey];
         if (!fill.firstSeen)
         {
             fill.firstSeen = now;
@@ -999,6 +1020,9 @@ bool PlayerbotMgr::StartLfgBot(LfgFill& fill, uint8 role)
     {
         Bot& bot = pair.second;
         if (bot.removing || !bot.inWorld || !bot.notifyGuid.IsEmpty() || bot.init || !onBotAccount(bot.session->GetAccountId()))
+            continue;
+        // a bot just released (e.g. kicked from this very group) is not sent back at once
+        if (bot.restUntil && int32(bot.restUntil - getMSTime()) > 0)
             continue;
         CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);
         if (!info || Player::TeamForRace(info->Race) != fill.report.team || info->Level > fill.report.level ||

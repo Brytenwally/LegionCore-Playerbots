@@ -116,24 +116,27 @@ Playerbots.AutoGear.BagEntry = 0
 
 #
 #    Playerbots.AutoGear.IlvlCap.*
-#        Highest item level autogear picks for a bot's level (quest rewards often have no required
-#        level, so this is what keeps a low bot out of high gear). Below 60: level + Below60Add; from
-#        60: level x the bracket's factor; at 110 only MaxItemLevel applies.
-#        Below60Add  (levels 1-59)    Default: 6
-#        Factor60    (levels 60-69)   Default: 1.3
-#        Factor70    (levels 70-79)   Default: 2.0
-#        Factor80    (levels 80-84)   Default: 2.8
-#        Factor85    (levels 85-89)   Default: 4.6
-#        Factor90    (levels 90-99)   Default: 5.8
-#        Factor100   (levels 100-109) Default: 7.0
+#        Highest item level a bot wears for its level (quest rewards often have no required level, so
+#        this is what keeps a low bot out of high gear). Autogear, equipping from the bags and need
+#        rolls all respect it; a worn piece above it is replaced by any allowed one.
+#        Below60Add: levels 1-59 may wear level + Below60Add.
+#        From 60, one item level per bracket of 5 levels (the key is the bracket's first level):
+#        roughly that level range's dungeon and quest gear (Outland, Northrend, Cataclysm,
+#        Pandaria, Draenor, Broken Isles). 0 = no cap for that bracket. At 110 only MaxItemLevel.
+#        Default: Below60Add 6, 60: 100, 65: 115, 70: 165, 75: 200, 80: 285, 85: 400, 90: 560,
+#                 95: 630, 100: 735, 105: 820
 
 Playerbots.AutoGear.IlvlCap.Below60Add = 6
-Playerbots.AutoGear.IlvlCap.Factor60 = 1.3
-Playerbots.AutoGear.IlvlCap.Factor70 = 2.0
-Playerbots.AutoGear.IlvlCap.Factor80 = 2.8
-Playerbots.AutoGear.IlvlCap.Factor85 = 4.6
-Playerbots.AutoGear.IlvlCap.Factor90 = 5.8
-Playerbots.AutoGear.IlvlCap.Factor100 = 7.0
+Playerbots.AutoGear.IlvlCap.60 = 100
+Playerbots.AutoGear.IlvlCap.65 = 115
+Playerbots.AutoGear.IlvlCap.70 = 165
+Playerbots.AutoGear.IlvlCap.75 = 200
+Playerbots.AutoGear.IlvlCap.80 = 285
+Playerbots.AutoGear.IlvlCap.85 = 400
+Playerbots.AutoGear.IlvlCap.90 = 560
+Playerbots.AutoGear.IlvlCap.95 = 630
+Playerbots.AutoGear.IlvlCap.100 = 735
+Playerbots.AutoGear.IlvlCap.105 = 820
 
 
 #

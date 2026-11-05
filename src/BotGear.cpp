@@ -11,6 +11,7 @@
 #include "Log.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "PlayerbotMgr.h"
 #include <algorithm>
 #include <cstring>
 #include <unordered_map>
@@ -199,18 +200,21 @@ namespace BotGear
         // were still too generous (build #22); the brackets and their values are the owner's.
         uint32 ItemLevelCapFor(uint8 level, Options const& options)
         {
-            float cap;
-            if (level < 60)       cap = level + options.belowSixtyAdd;
-            else if (level < 70)  cap = level * options.factor60;
-            else if (level < 80)  cap = level * options.factor70;
-            else if (level < 85)  cap = level * options.factor80;
-            else if (level < 90)  cap = level * options.factor85;
-            else if (level < 100) cap = level * options.factor90;
-            else if (level < 110) cap = level * options.factor100;
-            else
-                return 0;                                   // 110: only Playerbots.AutoGear.MaxItemLevel
-            return uint32(std::max(1.0f, cap));
+            uint32 cap = 0;
+            if (level < 60)
+                cap = uint32(std::max(1.0f, level + options.belowSixtyAdd));
+            else if (level < 110)
+                cap = options.brackets[std::min<uint32>((level - 60) / 5, 9)];
+            // Playerbots.AutoGear.MaxItemLevel caps every level
+            if (options.maxItemLevel && (!cap || cap > options.maxItemLevel))
+                cap = options.maxItemLevel;
+            return cap;
         }
+    }
+
+    uint32 ItemLevelCap(uint8 level, Options const& options)
+    {
+        return ItemLevelCapFor(level, options);
     }
 
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel)
@@ -287,6 +291,7 @@ namespace BotGear
         uint32 const levelCap = ItemLevelCapFor(level, options);
         uint32 const armorType = WornArmorType(bot);
         Hands const hands = HandsFor(spec);
+        result.itemLevelCap = levelCap;
 
         result.bagsAdded = AddBags(bot, options.bagEntry);
 
@@ -376,16 +381,24 @@ namespace BotGear
             if (score <= 0.0f)
                 continue;
 
+            ++result.candidates;
             offer(kind, proto, score);
             if (type == INVTYPE_WEAPON)
                 offer(KIND_1H_OFF, proto, score);
         }
 
         // what the bot wears in a slot, scored the same way
-        auto wornScore = [bot](uint8 slot) -> float
+        // a worn piece above the cap counts as nothing (owner, build #26: about 1 bot in 10 kept a near end-game
+        // piece at a low level, from a quest reward or loot): any allowed piece replaces it
+        auto wornScore = [bot, levelCap](uint8 slot) -> float
         {
             Item* item = bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot);
-            return item ? ItemScore(bot, item->GetTemplate(), item->GetItemLevel(bot->getLevel())) : 0.0f;
+            if (!item)
+                return 0.0f;
+            uint32 const itemLevel = item->GetItemLevel(bot->getLevel());
+            if (levelCap && itemLevel > levelCap)
+                return 0.0f;
+            return ItemScore(bot, item->GetTemplate(), itemLevel);
         };
 
         auto equip = [&](uint8 slot, ItemTemplate const* proto) -> bool
@@ -660,10 +673,19 @@ namespace BotGear
             return result;
 
         auto worn = [bot](uint8 slot) -> Item* { return bot->GetItemByPos(INVENTORY_SLOT_BAG_0, slot); };
-        auto wornScore = [bot, &worn](uint8 slot) -> float
+        // the same cap as autogear: nothing above it is put on, and a worn piece above it counts as nothing
+        uint32 const levelCap = ItemLevelCap(bot->getLevel(), sPlayerbotMgr->GetGearOptions());
+        if (levelCap && itemLevel > levelCap)
+            return result;
+        auto wornScore = [bot, &worn, levelCap](uint8 slot) -> float
         {
             Item* item = worn(slot);
-            return item ? ItemScore(bot, item->GetTemplate(), item->GetItemLevel(bot->getLevel())) : 0.0f;
+            if (!item)
+                return 0.0f;
+            uint32 const wornLevel = item->GetItemLevel(bot->getLevel());
+            if (levelCap && wornLevel > levelCap)
+                return 0.0f;
+            return ItemScore(bot, item->GetTemplate(), wornLevel);
         };
         auto isTwoHander = [](ItemTemplate const* p)
         {
