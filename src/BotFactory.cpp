@@ -87,21 +87,25 @@ namespace BotFactory
             uint32 specId;
             char const* names[MAX_TALENT_TIERS];
         };
+        // The owner's builds come from 7.0 guides; 7.3.5 moved or replaced some talents. Corrected from the startup
+        // check's log (owner's server, build #26): a talent that moved to another row is kept there; otherwise the
+        // row's passive talent (the rotations do not cast talent abilities yet), never one that replaces a spell
+        // the rotation casts (Blessed Hammer replaces Prot's Hammer of the Righteous).
         TalentBuild const TalentBuilds[] =
         {
             { 250, { "Bloodworms", "Rapid Decomposition", "Ossuary", "Red Thirst", "Tremble Before Me", "Foul Bulwark", "Bonestorm" } },
             { 251, { "Shattering Strikes", "Freezing Fog", "Icecap", "Abomination's Might", "Permafrost", "Frostscythe", "Obliteration" } },
             { 252, { "All Will Serve", "Pestilent Pustules", "Unholy Frenzy", "Sludge Belcher", "Corpse Shield", "Shadow Infusion", "Defile" } },
             { 102, { "Force of Nature", "Renewal", "Restoration Affinity", "Typhoon", "Soul of the Forest", "Astral Communion", "Fury of Elune" } },
-            { 103, { "Predator", "Wild Charge", "Restoration Affinity", "Mighty Bash", "Savage Roar", "Elune's Guidance", "Brutal Slash" } },
+            { 103, { "Predator", "Wild Charge", "Restoration Affinity", "Mighty Bash", "Jagged Wounds", "Sabertooth", "Moment of Clarity" } },
             { 104, { "Brambles", "Wild Charge", "Restoration Affinity", "Mighty Bash", "Incarnation: Guardian of Ursoc", "Guardian of Elune", "Rend and Tear" } },
             { 105, { "Cenarion Ward", "Renewal", "Guardian Affinity", "Typhoon", "Cultivation", "Germination", "Flourish" } },
             { 253, { "Way of the Cobra", "Stomp", "Posthaste", "Bestial Fury", "Binding Shot", "A Murder of Crows", "Aspect of the Beast" } },
             { 254, { "Lone Wolf", "Black Arrow", "Posthaste", "Patient Sniper", "Camouflage", "Barrage", "Sidewinders" } },
-            { 255, { "Throwing Axes", "Snake Hunter", "Posthaste", "Improved Traps", "Camouflage", "Dragonsfire Grenade", "Expert Trapper" } },
-            { 62,  { "Presence of Mind", "Shimmer", "Rune of Power", "Supernova", "Ice Floes", "Nether Tempest", "Arcane Orb" } },
-            { 63,  { "Conflagration", "Shimmer", "Incanter's Flow", "Blast Wave", "Ice Floes", "Unstable Magic", "Meteor" } },
-            { 64,  { "Ray of Frost", "Cold Snap", "Incanter's Flow", "Ice Nova", "Ice Floes", "Frost Bomb", "Comet Storm" } },
+            { 255, { "Throwing Axes", "Snake Hunter", "Posthaste", "Guerrilla Tactics", "Camouflage", "Dragonsfire Grenade", "Expert Trapper" } },
+            { 62,  { "Amplification", "Shimmer", "Rune of Power", "Supernova", "Chrono Shift", "Nether Tempest", "Arcane Orb" } },
+            { 63,  { "Conflagration", "Shimmer", "Incanter's Flow", "Controlled Burn", "Frenetic Speed", "Unstable Magic", "Meteor" } },
+            { 64,  { "Ray of Frost", "Glacial Insulation", "Incanter's Flow", "Ice Nova", "Frigid Winds", "Frost Bomb", "Comet Storm" } },
             // Monk: chosen from the file's descriptions of each row
             { 268, { "Eye of the Tiger", "Chi Torpedo", "Light Brewing", "Leg Sweep", "Healing Elixir", "Invoke Niuzao, the Black Ox", "Elusive Dance" } },
             { 269, { "Eye of the Tiger", "Chi Torpedo", "Ascension", "Leg Sweep", "Healing Elixir", "Hit Combo", "Whirling Dragon Punch" } },
@@ -109,23 +113,23 @@ namespace BotFactory
             // Holy Paladin: the file's dungeon picks where it gives them (Bestow Faith, Holy Avenger; bots heal
             // groups), Beacon of the Lightbringer (Beacon of Virtue would replace the rotation's Beacon of Light)
             { 65,  { "Bestow Faith", "Unbreakable Spirit", "Fist of Justice", "Devotion Aura", "Holy Avenger", "Sanctified Wrath", "Beacon of the Lightbringer" } },
-            { 66,  { "Crusader's Judgment", "Blessed Hammer", "Blinding Light", "Blessing of Spellwarding", "Knight Templar", "Aegis of Light", "Seraphim" } },
-            { 70,  { "Final Verdict", "The Fires of Justice", "Fist of Justice", "Virtue's Blade", "Justicar's Vengeance", "Divine Steed", "Divine Purpose" } },
+            { 66,  { "Holy Shield", "Crusader's Judgment", "Blinding Light", "Blessing of Spellwarding", "Knight Templar", "Aegis of Light", "Seraphim" } },
+            { 70,  { "Final Verdict", "The Fires of Justice", "Fist of Justice", "Virtue's Blade", "Justicar's Vengeance", "Divine Intervention", "Divine Purpose" } },
             // Discipline: the file's suggestions (Castigation, Halo, Grace among its options)
-            { 256, { "Castigation", "Angelic Feather", "Shining Force", "Mindbender", "Contrition", "Halo", "Grace" } },
+            { 256, { "Castigation", "Angelic Feather", "Shining Force", "Mindbender", "Sanctuary", "Halo", "Grace" } },
             // Holy Priest: no row 30 in the file (Angelic Feather); row 100 "pick your favorite" (Circle of Healing, for 5-mans)
             { 257, { "Trail of Light", "Angelic Feather", "Censure", "Light of the Naaru", "Surge of Light", "Divinity", "Circle of Healing" } },
-            { 258, { "Shadow Word: Void", "Body and Soul", "Mind Bomb", "Void Lord", "San'layn", "Shadow Crash", "Mind Spike" } },
-            { 262, { "Totem Mastery", "Ancestral Guidance", "Voodoo Totem", "Elemental Blast", "Icefury", "Storm Elemental", "Lightning Rod" } },
-            { 263, { "Boulderfist", "Rainfall", "Voodoo Totem", "Lightning Shield", "Tempest", "Crashing Storm", "Landslide" } },
+            { 258, { "Shadow Word: Void", "Body and Soul", "Mind Bomb", "Lingering Insanity", "San'layn", "Misery", "Legacy of the Void" } },
+            { 262, { "Totem Mastery", "Ancestral Guidance", "Voodoo Totem", "Aftershock", "Elemental Fusion", "Storm Elemental", "Lightning Rod" } },
+            { 263, { "Hot Hand", "Rainfall", "Voodoo Totem", "Lightning Shield", "Tempest", "Crashing Storm", "Boulderfist" } },
             { 264, { "Unleash Life", "Graceful Spirit", "Voodoo Totem", "Deluge", "Earthen Shield Totem", "Echo of the Elements", "High Tide" } },
-            { 259, { "Master Poisoner", "Nightstalker", "Anticipation", "Leeching Poison", "Prey on the Weak", "Agonizing Poison", "Marked for Death" } },
+            { 259, { "Master Poisoner", "Nightstalker", "Anticipation", "Leeching Poison", "Prey on the Weak", "Alacrity", "Marked for Death" } },
             { 260, { "Swordmaster", "Grappling Hook", "Vigor", "Iron Stomach", "Parley", "Killing Spree", "Marked for Death" } },
-            { 261, { "Gloomblade", "Subterfuge", "Vigor", "Soothing Darkness", "Strike from the Shadows", "Premeditation", "Marked for Death" } },
+            { 261, { "Gloomblade", "Subterfuge", "Vigor", "Soothing Darkness", "Strike from the Shadows", "Alacrity", "Marked for Death" } },
             // Warlock row 90: "Supremacy" as the file describes it; Demonology's Grimoire of Service
-            { 265, { "Haunt", "Absolute Corruption", "Demon Skin", "Siphon Life", "Burning Rush", "Grimoire of Supremacy", "Soul Conduit" } },
-            { 266, { "Shadowflame", "Improved Dreadstalkers", "Demon Skin", "Power Trip", "Burning Rush", "Grimoire of Service", "Summon Darkglare" } },
-            { 267, { "Roaring Blaze", "Reverse Entropy", "Demon Skin", "Eradication", "Burning Rush", "Grimoire of Supremacy", "Soul Conduit" } },
+            { 265, { "Haunt", "Absolute Corruption", "Demonic Circle", "Sow the Seeds", "Burning Rush", "Grimoire of Supremacy", "Soul Conduit" } },
+            { 266, { "Shadowflame", "Improved Dreadstalkers", "Demonic Circle", "Power Trip", "Burning Rush", "Grimoire of Service", "Summon Darkglare" } },
+            { 267, { "Roaring Blaze", "Reverse Entropy", "Demonic Circle", "Fire and Brimstone", "Burning Rush", "Grimoire of Supremacy", "Soul Conduit" } },
         };
 
         char const* BuildTalentName(uint32 spec, uint8 tier)

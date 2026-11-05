@@ -672,8 +672,13 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   shield / dual-wield specs fixed), follow out of combat only, all group chats, dungeon finder fill, `co`/`nc`
   strategies, old orders, `aggressive`, `loot`. No freeze seen while creating shamans. **Problems**: bots from
   older builds stuck in dead groups; no replacement filled after kicking a bot from a dungeon finder group;
-  item level caps (high pieces at low levels, poor gear at 80). Fixes in the commit after. The talent / setup
-  logs he meant to send did not arrive.
+  item level caps (high pieces at low levels, poor gear at 80). Fixes in the commit after.
+  His log of that build: **setup takes 10-26 ms per bot** (zones 0-6, level/spec 0-7, talents 0-1, gear 9-15,
+  save 0-2): no freeze in setup. Startup: `Talent builds: 31 specs, 28 name(s) not found`; the table is
+  corrected from the rows the log lists (7.3.5 moved many 7.0 talents: Enhancement's Boulderfist row 1 -> 7,
+  Prot Paladin's Crusader's Judgment row 1 -> 2, Frost's Ice Floes row 5 -> 2...): a moved talent is kept in
+  its new row, else the row's passive one, never Blessed Hammer (replaces the Hammer of the Righteous the
+  Prot rotation casts). Loot, aggressive pulls, dismissals and reuse logged as expected.
 
 ## Checking
 
