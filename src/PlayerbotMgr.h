@@ -70,7 +70,7 @@ public:
     // World thread, every world update.
     void Update(uint32 diff);
     // Any thread: a client's character logged out.
-    void OnPlayerLogout(uint32 accountId);
+    void OnPlayerLogout(uint32 accountId, ObjectGuid const& player);
     void Shutdown();
 
 private:
@@ -85,6 +85,7 @@ private:
         bool removing = false;
         std::shared_ptr<BotFactory::CreateRequest> init;    // a created bot, initialized once in the world
         bool toGMIsland = false;                            // a pool bot logged in at startup: waits on GM Island
+        int32 ownerGoneTimer = -1;                          // ms until logout after its owner logged out, -1 = none
     };
     // ".playerbots create": an idle logged-in pool bot, else an offline bot character, of the class and the
     // creator's faction and at most his level; false when there is none (a new one is made)
@@ -118,7 +119,7 @@ private:
     std::vector<BotFactory::CreateRequest> _createRequests;  // filled from any thread, read in Update
     std::vector<PendingLogin> _pendingLogins;               // world thread only
     std::mutex _logoutLock;
-    std::vector<uint32> _loggedOutAccounts;                 // filled from map threads, read in Update
+    std::vector<std::pair<uint32, ObjectGuid>> _loggedOutPlayers;  // filled from map threads, read in Update
 };
 
 #define sPlayerbotMgr PlayerbotMgr::instance()

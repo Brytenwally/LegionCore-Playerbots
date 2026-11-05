@@ -16,6 +16,11 @@
 #include "WorldSession.h"
 #include <algorithm>
 
+namespace
+{
+    int32 const OwnerGoneLogoutDelay = 60000;               // bot-account bots of a player who logged out
+}
+
 PlayerbotMgr* PlayerbotMgr::instance()
 {
     static PlayerbotMgr instance;
@@ -335,21 +340,55 @@ void PlayerbotMgr::Update(uint32 diff)
         UpdatePool(diff);
     ProcessCreates(diff);
 
-    // owner's rule (SkyFire): a player logging out takes the bots of his account with him, so his
-    // alts are never left running while he logs into one of them
-    std::vector<uint32> accounts;
+    // Owner's rules when a player logs out or disconnects (2026-11-05; the first one from SkyFire):
+    // - the bots of his account (alt bots) log out at once, so an alt is never left running while he
+    //   logs into it;
+    // - the other bots he leads (bot-account bots) log out after OwnerGoneLogoutDelay, unless he is back
+    //   in the world by then.
+    std::vector<std::pair<uint32, ObjectGuid>> players;
     {
         std::lock_guard<std::mutex> lock(_logoutLock);
-        accounts.swap(_loggedOutAccounts);
+        players.swap(_loggedOutPlayers);
     }
-    for (uint32 accountId : accounts)
+    for (auto const& player : players)
         for (auto& pair : _bots)
-            if (!pair.second.removing && pair.second.session->GetAccountId() == accountId)
+        {
+            Bot& bot = pair.second;
+            if (bot.removing)
+                continue;
+            if (bot.session->GetAccountId() == player.first)
             {
-                pair.second.removing = true;
-                pair.second.session->LogoutBot();
-                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out with its account's player.", pair.second.name.c_str());
+                bot.removing = true;
+                bot.session->LogoutBot();
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out with its account's player.", bot.name.c_str());
             }
+            else if (!player.second.IsEmpty() && bot.notifyGuid == player.second && bot.ownerGoneTimer < 0)
+            {
+                bot.ownerGoneTimer = OwnerGoneLogoutDelay;
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s': its owner logged out, it logs out in %u s unless he returns.",
+                    bot.name.c_str(), OwnerGoneLogoutDelay / 1000);
+            }
+        }
+
+    for (auto& pair : _bots)
+    {
+        Bot& bot = pair.second;
+        if (bot.ownerGoneTimer < 0 || bot.removing)
+            continue;
+        if (ObjectAccessor::FindPlayer(bot.notifyGuid))     // back in the world: only an existence check here
+        {
+            bot.ownerGoneTimer = -1;
+            continue;
+        }
+        bot.ownerGoneTimer -= int32(diff);
+        if (bot.ownerGoneTimer <= 0)
+        {
+            bot.ownerGoneTimer = -1;
+            bot.removing = true;
+            bot.session->LogoutBot();
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out: its owner did not come back.", bot.name.c_str());
+        }
+    }
 
     for (auto itr = _bots.begin(); itr != _bots.end();)
     {
@@ -432,10 +471,10 @@ std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> PlayerbotMgr::G
     return owned;
 }
 
-void PlayerbotMgr::OnPlayerLogout(uint32 accountId)
+void PlayerbotMgr::OnPlayerLogout(uint32 accountId, ObjectGuid const& player)
 {
     std::lock_guard<std::mutex> lock(_logoutLock);
-    _loggedOutAccounts.push_back(accountId);
+    _loggedOutPlayers.emplace_back(accountId, player);
 }
 
 void PlayerbotMgr::Shutdown()

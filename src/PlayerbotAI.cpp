@@ -44,6 +44,7 @@ namespace
     float const FollowAngle = float(M_PI);                  // behind the leader
     uint32 const CombatCheckInterval = 250;                 // ms between combat checks (one cast at most each)
     uint32 const TalentCheckInterval = 10000;               // ms between checks for empty talent rows
+    int32 const GroupLeftLogoutDelay = 3000;                // owner's rule: logout this long after leaving his group
     float const RangedDistance = 25.0f;                     // ranged roles chase to this distance
     float const RangedStopDistance = 30.0f;                 // ... and stop chasing within this (and in sight)
     float const HealBelowPct = 90.0f;                       // healers heal allies below this
@@ -81,6 +82,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     }
 
     HandleGroupInvite(bot);
+    CheckOwnerGroup(bot, diff);
 
     // owner's decision: talents are learned automatically, alts included, into empty rows only
     _talentTimer += diff;
@@ -364,6 +366,7 @@ void PlayerbotAI::LeaveGroup(Player* bot, OrderSender const& sender)
     bot->GetSession()->QueuePacket(packet);
 
     _stay = false;
+    _leftByOrder = true;                                    // leaving by order keeps the bot online
     StopFollowing(bot);
     Say(bot, sender.guid, "Leaving the group.");
 }
@@ -1544,5 +1547,43 @@ void PlayerbotAI::TalentsOrder(Player* bot, OrderSender const& sender, std::stri
     }
 
     Say(bot, sender.guid, BotFactory::DescribeTalents(bot));
+}
+
+// Owner's rule (2026-11-05): when the owner leaves the group or removes the bot from it, the bot (alt bot or
+// bot-account bot) logs out 3 s later. Only after it has been in a group with its master, and not when it left
+// by the "leave" order. LogoutBot only raises a flag: the session logs the character out on its own thread.
+void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
+{
+    if (_master.IsEmpty())
+        return;
+
+    Group* group = bot->GetGroup();
+    if (group && group->IsMember(_master))
+    {
+        _wasWithOwner = true;
+        _leftByOrder = false;
+        _groupLogoutTimer = -1;
+        return;
+    }
+
+    if (!_wasWithOwner || _leftByOrder)
+        return;
+
+    if (_groupLogoutTimer < 0)
+    {
+        _groupLogoutTimer = GroupLeftLogoutDelay;
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is no longer in its owner's group: logging out in %d s.",
+            bot->GetName(), GroupLeftLogoutDelay / 1000);
+        return;
+    }
+
+    _groupLogoutTimer -= int32(diff);
+    if (_groupLogoutTimer > 0)
+        return;
+
+    _groupLogoutTimer = -1;
+    _wasWithOwner = false;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logs out: it left its owner's group.", bot->GetName());
+    bot->GetSession()->LogoutBot();
 }
 

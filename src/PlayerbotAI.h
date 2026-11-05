@@ -77,6 +77,9 @@ private:
     // own objectives (owner's rule); refuses on bag space or daily/weekly limits, telling `to`.
     bool TurnInQuest(Player* bot, Quest const* quest, WorldObject* giver, ObjectGuid const& to);
     void HandleGroupInvite(Player* bot);
+    // owner's rule: once the bot has been in its owner's group, leaving it (he left, or removed the bot)
+    // logs the bot out GroupLeftLogoutDelay later
+    void CheckOwnerGroup(Player* bot, uint32 diff);
     // Combat (plan steps 4.1 / 4.2): target by the never-pull rule and the assist mode, engage after the
     // engage delay, then one rotation step per check. Healers do not melee; they heal and cast the
     // rotation's enemy steps.
@@ -127,6 +130,9 @@ private:
     ObjectGuid _healMoveGuid;                               // a healer walking to an out-of-reach heal target
     uint32 _combatTimer = 0;
     uint32 _talentTimer = 0;
+    bool _wasWithOwner = false;                             // has been in a group with its master
+    bool _leftByOrder = false;                              // the "leave" order: no logout for that
+    int32 _groupLogoutTimer = -1;                           // ms until logout, -1 = none
     // a created bot invites itself into its creator's party: his session sends the invite a few seconds after
     // the setup (the bot is teleporting to him meanwhile), and the bot accepts it as any master's invite
     ObjectGuid _inviteCreator;

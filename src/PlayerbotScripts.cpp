@@ -136,7 +136,7 @@ public:
     {
         if (WorldSession* session = player->GetSession())
             if (!session->IsBot())
-                sPlayerbotMgr->OnPlayerLogout(session->GetAccountId());
+                sPlayerbotMgr->OnPlayerLogout(session->GetAccountId(), player->GetGUID());
     }
 
 private:

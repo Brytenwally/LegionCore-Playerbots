@@ -59,8 +59,19 @@ come first.
 - "logged in" = player in world and `!PlayerLoading()`; then `Bot 'X' logged in.` is sent to
   the GM who added it (SkyFire wording, SquidBots Lite parses it).
 - Owner's rule kept from SkyFire: a client's character logging out (`PlayerScript::OnLogout`,
-  map thread -> mutex-protected account list) logs out every bot of the same account, so an
-  alt is never left running while the player logs into it.
+  map thread -> mutex-protected list of (account, guid)) logs out every bot of the same account
+  **at once**, so an alt is never left running while the player logs into it.
+- Owner's rules (2026-11-05) for logging bots out:
+  - The player logs out or disconnects: his **alt bots** (his account) log out at once (above);
+    the **bot-account bots he leads** (`Bot::notifyGuid` = him) log out **after 60 s**
+    (`Bot::ownerGoneTimer`, `OwnerGoneLogoutDelay`), cancelled if he is back in the world by then
+    (`ObjectAccessor::FindPlayer`, existence only).
+  - He **leaves the group or removes the bot** from it: the bot (alt or bot-account) logs out **3 s
+    later** (`PlayerbotAI::CheckOwnerGroup`: once the bot has been in a group with its master,
+    `group->IsMember(_master)` turning false starts `_groupLogoutTimer`; back in his group cancels).
+    Not when the bot left by the `leave` order (`_leftByOrder`). A logged-out owner stays a group
+    member, so that case is the 60 s rule, not this one. The bot calls `LogoutBot()` itself (a flag;
+    the session logs out on its own thread and the manager drops the entry).
 - GM commands: `.playerbots add <name>`, `remove <name>`, `removeall`, `list`. Need
   `Playerbots.Enable = 1`. Any character of any account; must not be online.
 
