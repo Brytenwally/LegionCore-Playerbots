@@ -84,6 +84,8 @@ private:
     void MoveToHealTarget(Player* bot, Player* healTarget);
     // the owner among the members (his master, or a client player of his account), null if not on the map
     Player* FindOwner(std::vector<Player*> const& members) const;
+    Unit* FindLooseEnemy(Player* bot, std::vector<Player*> const& members) const;
+    bool TryTaunt(Player* bot, Unit* enemy);
     void LogSkip(Player* bot, size_t step, char const* spell, std::string const& reason);
     void AttackOrder(Player* bot, OrderSender const& sender);
     bool AssistOrder(Player* bot, OrderSender const& sender, std::string const& mode);
@@ -115,6 +117,7 @@ private:
     ObjectGuid _orderedTarget;                              // "attack" order: fought until it dies or "passive"
     ObjectGuid _combatTarget;                               // the enemy engaged (melee/ranged chase)
     bool _engaged = false;
+    bool _playerTank = false;                               // "player tank": the owner holds aggro, tank bots do not taunt
     ObjectGuid _healMoveGuid;                               // a healer walking to an out-of-reach heal target
     uint32 _combatTimer = 0;
     BotCombat::SpellThrottle _throttle;

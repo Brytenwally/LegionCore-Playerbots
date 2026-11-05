@@ -243,7 +243,20 @@ server** (see Status, 2026-11-05).
   (AshamaneCore had Dispel Magic, offensive on 7.3.5). Resto Shaman / Druid, Mistweaver and Disc
   keep AshamaneCore's lists. Not yet: healers dealing damage when nobody needs healing, mana /
   drinking (4.5), Light of Dawn's cone aims at the heal target only.
-- Not yet: taunts and tank threat (4.4), defensives/potions (4.5), ground-effect dodge
+- **Tanks (plan step 4.4, 2026-11-05, untested):** a tank (spec role) not in `player tank` and not
+  passive takes the first enemy hitting another ally (`FindLooseEnemy`: the owner's attackers first,
+  then the members', whose victim is that ally, within the engage range; never a pull) at once, no
+  engage delay, and taunts it (`TryTaunt`: `SpecRotation::taunt`, then `tauntAlt` if not ready;
+  log `Bot 'X' taunts Y off Z (spell).`), then runs its rotation on it. No threat bonus (owner's
+  decision). Taunts: Prot Warrior Taunt, Prot Paladin Hand of Reckoning, Blood Dark Command then
+  Death Grip, Vengeance Torment, Brewmaster Provoke, Guardian Growl. Orders `player tank` (the
+  owner holds aggro: tank bots neither taunt nor grab loose enemies; they fight like dps) and `bot
+  tank` (default). Blood DK: LegionBotAI's defensives before AshamaneCore's list (Vampiric Blood
+  < 35% and Icebound Fortitude < 30% on itself, Dancing Rune Weapon < 50%, Death Strike < 70%,
+  Marrowrend below 5 Bone Shield stacks, Death Strike at 45 runic power, Heart Strike). New step
+  target `Self` (only while fighting) and condition `AuraStacksBelowOnSelf` (`AuraStacksNamed`).
+  Interrupts per spec were already in the table.
+- Not yet: tank threat bonus (owner: no), defensives/potions (4.5), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot, talents (wired with the specs), formation.
 
 ## Status

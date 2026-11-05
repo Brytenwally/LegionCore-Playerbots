@@ -46,7 +46,8 @@ When you log out, the bots of your account (your alts) log out with you.
   themselves), within 30 yards, after a short delay so you swing first; tanks and melee chase the
   enemy, ranged stay at about 25 yards, healers stay with you and heal (the lowest ally below 90%,
   the tank first, a dying ally before anything else; they walk closer to someone out of reach and
-  keep beacons / Prayer of Mending on the tank). Each spec casts a simple
+  keep beacons / Prayer of Mending on the tank). Tank bots taunt and take whatever hits someone
+  else in the group (`player tank` if you hold aggro yourself, `bot tank` to switch back). Each spec casts a simple
   priority list (all 36 specs, spell names looked up in the server's spell data). Orders:
   `attack` (your target, until it dies or you say `passive`), `passive` (stop fighting and fight
   nothing, not even what attacks the bot, until `attack` or `assist full|defend`), `assist

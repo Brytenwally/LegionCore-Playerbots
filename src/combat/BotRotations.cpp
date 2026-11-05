@@ -7,6 +7,7 @@
 #include "DB2Stores.h"
 #include "Log.h"
 #include "Player.h"
+#include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include <algorithm>
@@ -33,7 +34,7 @@ namespace BotRotations
                     { "Shield Slam",   Cond::Always },
                     { "Devastate",     Cond::Always }
                 },
-                "Pummel"
+                "Pummel", nullptr, "Taunt"
             },
             // Warrior Fury
             {
@@ -92,7 +93,7 @@ namespace BotRotations
                     { "Consecration",            Cond::AuraMissingOnSelf, 0.0f, 0, "Consecration" },
                     { "Hammer of the Righteous", Cond::Always }
                 },
-                "Rebuke"
+                "Rebuke", nullptr, "Hand of Reckoning"
             },
             // Paladin Retribution
             {
@@ -126,11 +127,16 @@ namespace BotRotations
             {
                 250, SPELLFAMILY_DEATHKNIGHT, CombatRole::Tank,
                 {
-                    { "Marrowrend",  Cond::AuraMissingOnSelf, 0.0f, 0, "Bone Shield" },
-                    { "Death Strike", Cond::ResourceAtLeast, 45.0f, POWER_RUNIC_POWER },
-                    { "Heart Strike", Cond::Always }
+                    // LegionBotAI's Blood defensives (plan step 4.4) before AshamaneCore's list
+                    { "Vampiric Blood",      Cond::SelfHealthPctBelow, 35.0f, 0, nullptr, StepTarget::Self },
+                    { "Icebound Fortitude",  Cond::SelfHealthPctBelow, 30.0f, 0, nullptr, StepTarget::Self },
+                    { "Dancing Rune Weapon", Cond::SelfHealthPctBelow, 50.0f },
+                    { "Death Strike",        Cond::SelfHealthPctBelow, 70.0f },
+                    { "Marrowrend",          Cond::AuraStacksBelowOnSelf, 5.0f, 0, "Bone Shield" },
+                    { "Death Strike",        Cond::ResourceAtLeast, 45.0f, POWER_RUNIC_POWER },
+                    { "Heart Strike",        Cond::Always }
                 },
-                "Mind Freeze"
+                "Mind Freeze", nullptr, "Dark Command", "Death Grip"
             },
             // Death Knight Frost
             {
@@ -206,7 +212,7 @@ namespace BotRotations
                     { "Sigil of Flame",  Cond::Always },
                     { "Soul Cleave",     Cond::Always }
                 },
-                "Disrupt"
+                "Disrupt", nullptr, "Torment"
             },
             // Mage Arcane
             {
@@ -371,7 +377,7 @@ namespace BotRotations
                     { "Blackout Strike", Cond::Always },
                     { "Tiger Palm",     Cond::Always }
                 },
-                "Spear Hand Strike"
+                "Spear Hand Strike", nullptr, "Provoke"
             },
             // Monk Windwalker
             {
@@ -428,7 +434,7 @@ namespace BotRotations
                     { "Moonfire", Cond::AuraMissingOnTarget, 0.0f, 0, "Moonfire" },
                     { "Maul",    Cond::Always }
                 },
-                "Skull Bash"
+                "Skull Bash", nullptr, "Growl"
             }
         };
 
@@ -464,6 +470,10 @@ namespace BotRotations
                     wanted.insert(Lower(rotation.interrupt));
                 if (rotation.dispel)
                     wanted.insert(Lower(rotation.dispel));
+                if (rotation.taunt)
+                    wanted.insert(Lower(rotation.taunt));
+                if (rotation.tauntAlt)
+                    wanted.insert(Lower(rotation.tauntAlt));
             }
 
             for (std::string const& name : wanted)
@@ -579,6 +589,19 @@ namespace BotRotations
         return false;
     }
 
+    uint32 AuraStacksNamed(Unit const* unit, char const* name)
+    {
+        if (!unit || !name)
+            return 0;
+
+        Initialize();
+        uint32 stacks = 0;
+        for (uint32 id : SpellsNamed(name))
+            if (Aura const* aura = unit->GetAura(id))
+                stacks = std::max<uint32>(stacks, aura->GetStackAmount());
+        return stacks;
+    }
+
     float DisplayedPower(Player const* bot, Powers power)
     {
         float value = float(bot->GetPower(power));
@@ -604,6 +627,8 @@ namespace BotRotations
                 return !HasAuraNamed(bot, step.auxSpell);
             case Cond::AuraPresentOnSelf:
                 return HasAuraNamed(bot, step.auxSpell);
+            case Cond::AuraStacksBelowOnSelf:
+                return AuraStacksNamed(bot, step.auxSpell) < uint32(step.value);
             case Cond::AuraMissingOnTarget:
                 return target && !HasAuraNamed(target, step.auxSpell, bot->GetGUID());
             case Cond::InjuredNearTarget:
@@ -625,6 +650,7 @@ namespace BotRotations
             case Cond::ResourceAtLeast:      snprintf(buffer, sizeof(buffer), "power %u >= %.0f", step.power, step.value); break;
             case Cond::AuraMissingOnSelf:    snprintf(buffer, sizeof(buffer), "no %s on self", step.auxSpell); break;
             case Cond::AuraPresentOnSelf:    snprintf(buffer, sizeof(buffer), "%s on self", step.auxSpell); break;
+            case Cond::AuraStacksBelowOnSelf: snprintf(buffer, sizeof(buffer), "fewer than %.0f %s on self", step.value, step.auxSpell); break;
             case Cond::AuraMissingOnTarget:  snprintf(buffer, sizeof(buffer), "no %s of mine on target", step.auxSpell); break;
             case Cond::InjuredNearTarget:    snprintf(buffer, sizeof(buffer), "%.0f allies below 85%% within %.0f yd of target", step.value, step.radius); break;
             case Cond::InjuredNearSelf:      snprintf(buffer, sizeof(buffer), "%.0f allies below 85%% within %.0f yd", step.value, step.radius); break;

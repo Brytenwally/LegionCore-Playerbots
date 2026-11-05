@@ -163,7 +163,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], player tank, bot tank, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -211,6 +211,21 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "attack")
     {
         AttackOrder(bot, sender);
+        return true;
+    }
+
+    if (order == "player tank")
+    {
+        _playerTank = true;
+        Say(bot, sender.guid, BotRotations::RoleOf(bot) == BotRotations::CombatRole::Tank ?
+            "You tank: I won't taunt, I fight with you." : "You tank (only matters to tank bots).");
+        return true;
+    }
+    if (order == "bot tank")
+    {
+        _playerTank = false;
+        Say(bot, sender.guid, BotRotations::RoleOf(bot) == BotRotations::CombatRole::Tank ?
+            "I tank: I taunt whatever attacks the group." : "Bot tanks tank again.");
         return true;
     }
 
@@ -972,7 +987,16 @@ void PlayerbotAI::UpdateCombat(Player* bot)
 
     bool ordered = false;
     Unit* enemy = SelectTarget(bot, members, ordered);
-    if (enemy && !ordered && !_engageTimer.Ready(enemy->GetGUID(), getMSTime(), sPlayerbotMgr->GetEngageDelay()))
+
+    // tanks (plan step 4.4): an enemy hitting someone else is theirs at once, no engage delay (it is
+    // already in the fight); unless the owner tanks ("player tank") or the bot is passive
+    Unit* loose = nullptr;
+    if (!ordered && role == BotRotations::CombatRole::Tank && !_playerTank && _assist != AssistMode::Passive)
+        loose = FindLooseEnemy(bot, members);
+    if (loose)
+        enemy = loose;
+
+    if (enemy && !ordered && !loose && !_engageTimer.Ready(enemy->GetGUID(), getMSTime(), sPlayerbotMgr->GetEngageDelay()))
     {
         // LegionBotAI's engage delay: the player swings first; a fight already going on goes on
         Unit* current = bot->getVictim();
@@ -987,7 +1011,60 @@ void PlayerbotAI::UpdateCombat(Player* bot)
     if (bot->IsNonMeleeSpellCast(false))
         return;
 
+    if (loose && TryTaunt(bot, loose))
+        return;
+
     RunRotation(bot, members, role, enemy);
+}
+
+// LegionBotAI's tank: the first enemy hitting an ally other than the bot (the owner's first) within reach.
+// Never a pull: it must already be attacking one of them.
+Unit* PlayerbotAI::FindLooseEnemy(Player* bot, std::vector<Player*> const& members) const
+{
+    float const range = sPlayerbotMgr->GetEngageRange();
+    Player* owner = FindOwner(members);
+    std::vector<Player*> allies;
+    if (owner && owner != bot)
+        allies.push_back(owner);
+    for (Player* member : members)
+        if (member != bot && member != owner)
+            allies.push_back(member);
+
+    for (Player* ally : allies)
+    {
+        if (!ally->IsAlive())
+            continue;
+        for (Unit* attacker : *ally->getAttackers())
+            if (attacker && attacker->IsInWorld() && attacker->IsAlive() && attacker->getVictim() == ally &&
+                attacker->GetMap() == bot->GetMap() && bot->IsValidAttackTarget(attacker) &&
+                bot->GetDistance(attacker) <= range)
+                return attacker;
+    }
+    return nullptr;
+}
+
+// the spec's taunt on an enemy hitting someone else, its second taunt when the first is not ready
+bool PlayerbotAI::TryTaunt(Player* bot, Unit* enemy)
+{
+    BotRotations::SpecRotation const* rotation = BotRotations::GetRotation(bot->GetSpecializationId());
+    if (!rotation || enemy->getVictim() == bot)
+        return false;
+
+    for (char const* name : { rotation->taunt, rotation->tauntAlt })
+    {
+        uint32 const spellId = BotRotations::KnownSpell(bot, name, rotation->family);
+        if (!spellId)
+            continue;
+        BotCombat::CastOutcome const outcome = BotCombat::BotCast(bot, enemy, spellId, _throttle);
+        if (outcome)
+        {
+            if (sPlayerbotMgr->GetCombatLog() >= 1)
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' taunts %s off %s (%s).", bot->GetName(),
+                    enemy->GetName(), enemy->getVictim() ? enemy->getVictim()->GetName() : "?", name);
+            return true;
+        }
+    }
+    return false;
 }
 
 // LegionBotAI's targeting: a bot never pulls. It fights an ordered target, or a unit attacking the group
@@ -1189,6 +1266,8 @@ void PlayerbotAI::RunRotation(Player* bot, std::vector<Player*> const& members, 
                 // buffs on the tank / owner only while there is something to fight or heal
                 case BotRotations::StepTarget::Tank:       target = (enemy || healTarget) ? tank : nullptr; break;
                 case BotRotations::StepTarget::Owner:      target = (enemy || healTarget) && owner && owner->IsAlive() ? owner : nullptr; break;
+                // defensives: only while fighting
+                case BotRotations::StepTarget::Self:       target = (enemy || bot->isInCombat()) ? static_cast<Unit*>(bot) : nullptr; break;
                 default: break;
             }
             if (!target)
