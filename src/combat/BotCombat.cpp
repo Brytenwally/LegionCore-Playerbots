@@ -103,6 +103,13 @@ namespace BotCombat
         if (throttle.IsThrottled(spellId, now))
             return refuse(CastRefusal::Throttled);
 
+        // A spell with a cast time or a channel fails with SPELL_FAILED_MOVING while the bot's movement
+        // flags say it moves (owner's log 2026-11-05: Unstable Affliction / Drain Soul, result 72, while
+        // a ranged bot chased its target). Stop first; chase and follow wait while the bot casts
+        // (IsMovementPreventedByCasting).
+        if ((spellInfo->IsChanneled() || spellInfo->CalcCastTime(bot) > 0) && (bot->isMoving() || !bot->IsStopped()))
+            bot->StopMoving();
+
         if (target != bot)
             bot->SetFacingToObject(target);
 

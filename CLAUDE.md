@@ -191,7 +191,8 @@ server** (see Status, 2026-11-05).
   `Playerbots.Combat.EngageRange` (30 yd) of the bot. A new enemy waits
   `Playerbots.Combat.EngageDelay` (1200 ms, `EngageTimer`).
 - Engage: tank/melee `Attack(enemy, true)` + `MoveChase(enemy)`; ranged `Attack(enemy, false)` +
-  `MoveChase(enemy, 25)`; healers never engage (they follow and heal). In `stay`, no chase. No enemy
+  `MoveChase(enemy, 25)` only while farther than 30 yd or out of sight, standing still (MoveIdle +
+  `StopMoving`) once in reach; healers never engage (they follow and heal). In `stay`, no chase. No enemy
   left -> `StopCombat` (AttackStop, MoveIdle, follow again at once).
 - Role (`BotRotations::RoleOf`): the rotation's role (tank/healer/melee/ranged); specs without a
   rotation fall back to the spec role and class.
@@ -213,6 +214,14 @@ server** (see Status, 2026-11-05).
   `Bot 'X' stops fighting: reason.`; 2 = also `Bot 'X' skips Spell: reason` (not known, condition
   not met: ..., on cooldown, global cooldown, AI delay, cast failed (result N) = `SpellCastResult`),
   logged when a step's reason changes.
+- **Cast-time spells while moving** (owner's log, build #17, level 15 Affliction: `skips Unstable
+  Affliction: cast failed (result 72)`, same for Drain Soul, while instants worked): 72 =
+  `SPELL_FAILED_MOVING`. `Spell::prepare` refuses a cast-time / channelled spell when the player's
+  movement flags say moving (`Unit::isMoving`, `m_movementInfo`; server splines set
+  `MOVEMENTFLAG_FORWARD` and clear it only when the spline ends), and the ranged chase kept
+  re-pathing. Fix: `BotCast` calls `StopMoving()` before a cast-time / channelled spell (movement
+  generators then wait while casting, `IsMovementPreventedByCasting`), and ranged bots stop
+  chasing once in reach. **Rule: a bot must stand still before any non-instant cast.**
 - Owner's design rules (2026-11-05, after testing build #17): **`follow` does not interfere with
   a fight** (it no longer clears the ordered target; combat keeps the movement while engaged);
   **`passive`** (= `assist passive`) makes the bot passive towards enemies: it stops its fight at

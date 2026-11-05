@@ -41,6 +41,7 @@ namespace
     float const FollowAngle = float(M_PI);                  // behind the leader
     uint32 const CombatCheckInterval = 250;                 // ms between combat checks (one cast at most each)
     float const RangedDistance = 25.0f;                     // ranged roles chase to this distance
+    float const RangedStopDistance = 30.0f;                 // ... and stop chasing within this (and in sight)
     float const HealBelowPct = 90.0f;                       // healers heal allies below this
     float const TankFirstBelowPct = 75.0f;                  // ... the tank first once it is below this
     float const CriticalHealthPct = 40.0f;                  // triage: healed before interrupts and dispels
@@ -1083,6 +1084,23 @@ void PlayerbotAI::Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role
             motion->MoveIdle();
         }
         return;
+    }
+
+    if (!melee)
+    {
+        // ranged: stand still once in range and in sight, chase only to get there; a chase that keeps
+        // re-pathing after a moving target leaves the bot "moving", which breaks its casts
+        bool const inReach = bot->GetDistance(enemy) <= RangedStopDistance && bot->IsWithinLOSInMap(enemy);
+        if (inReach)
+        {
+            if (motion->GetCurrentMovementGeneratorType() == CHASE_MOTION_TYPE)
+            {
+                motion->Clear();
+                motion->MoveIdle();
+                bot->StopMoving();
+            }
+            return;
+        }
     }
 
     if (newTarget || motion->GetCurrentMovementGeneratorType() != CHASE_MOTION_TYPE)
