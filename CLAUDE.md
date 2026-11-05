@@ -391,6 +391,21 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   `RewardSpell` / `RewardDisplaySpell` learned (no XP, items or scripts); then
   `UpdateAreaDependentAuras`. Logged: `starting zone done (N quests marked complete)`, or an error
   if no AreaTable entry has those names.
+- **Random bots and masters** (owner's rules, 2026-11-05). Random bot = a bot of a bot account
+  (`PlayerbotMgr::IsBotAccountName`, account name starts with the prefix; `PlayerbotAI::_randomBot`).
+  - `.playerbots create` never takes a bot that has a master (`ReuseBot`: `notifyGuid` empty only).
+  - A random bot in a party **without its master** (a party of bots its leader left) **leaves it**
+    at once (`CheckOwnerGroup`: queued `CMSG_LEAVE_GROUP`, `_leaveQueued`), so it is free again; a
+    bot whose master left still logs out 3 s later (rule above).
+  - **Invites**: a random bot with no master accepts **any player's** invite (`HandleGroupInvite`;
+    the inviter, possibly on another map, is read with `ObjectAccessor::WithPlayer`: level, team,
+    position, account; bots are refused), keeps the inviter as `_pendingMaster` (so the masterless
+    leave rule does not pull it out of his party meanwhile) and calls
+    `PlayerbotMgr::RequestAssign`: on the world thread the inviter becomes `notifyGuid` and the
+    master of a **new `PlayerbotAI`**, whose `InitializeNewBot` levels it to him, sets spec /
+    talents / gear and teleports it to him (as `.playerbots create`). A random bot with a master
+    declines other players and whispers **"I already have a master, try another bot."** Alt bots
+    keep accepting only their master / account.
 - Not yet: Warrior and Demon Hunter talent builds, gems/enchants, bonus IDs (item
   levels are the templates' base levels), artifact weapons (AshamaneCore's table, step 5),
   `Game.Patch` item level tiers.

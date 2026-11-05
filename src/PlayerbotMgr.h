@@ -49,6 +49,11 @@ public:
     // Any thread: queues ".playerbots create"; the world thread creates the character, logs it in a few
     // seconds later (its rows must be in the database) and has it initialized once in the world.
     void RequestCreate(BotFactory::CreateRequest const& request);
+    // Any thread: a masterless random bot accepted a player's invite; the world thread makes the player its
+    // master (new AI) and has it set up to his level and summoned to him.
+    void RequestAssign(ObjectGuid const& bot, BotFactory::CreateRequest const& request);
+    // a bot account (<AccountPrefix>...): its bots are random bots, not alts
+    bool IsBotAccountName(std::string const& accountName) const;
     BotGear::Options GetGearOptions() const { return _gearOptions; }
 
     // Logs the bot out (saved); its entry goes once the session has ended.
@@ -117,6 +122,7 @@ private:
     BotFactory::CreateConfig _createConfig;
     std::mutex _createLock;
     std::vector<BotFactory::CreateRequest> _createRequests;  // filled from any thread, read in Update
+    std::vector<std::pair<ObjectGuid, BotFactory::CreateRequest>> _assignRequests;  // same lock
     std::vector<PendingLogin> _pendingLogins;               // world thread only
     std::mutex _logoutLock;
     std::vector<std::pair<uint32, ObjectGuid>> _loggedOutPlayers;  // filled from map threads, read in Update

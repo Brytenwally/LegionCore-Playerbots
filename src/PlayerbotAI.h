@@ -40,7 +40,8 @@ class PlayerbotAI
 {
 public:
     // master: the player who added the bot (may be empty, e.g. added from the console).
-    PlayerbotAI(ObjectGuid const& master, uint32 accountId) : _master(master), _accountId(accountId) { }
+    // randomBot: a bot of a bot account (not anyone's alt)
+    PlayerbotAI(ObjectGuid const& master, uint32 accountId, bool randomBot) : _master(master), _accountId(accountId), _randomBot(randomBot) { }
 
     void Update(Player* bot, uint32 diff);
     // a whisper to the bot, from anywhere; only its owner is obeyed
@@ -130,6 +131,9 @@ private:
     ObjectGuid _healMoveGuid;                               // a healer walking to an out-of-reach heal target
     uint32 _combatTimer = 0;
     uint32 _talentTimer = 0;
+    bool _randomBot = false;
+    ObjectGuid _pendingMaster;                              // a random bot that accepted a player's invite, until its new AI takes over
+    bool _leaveQueued = false;                              // a random bot leaving a party without its master
     bool _wasWithOwner = false;                             // has been in a group with its master
     bool _leftByOrder = false;                              // the "leave" order: no logout for that
     int32 _groupLogoutTimer = -1;                           // ms until logout, -1 = none

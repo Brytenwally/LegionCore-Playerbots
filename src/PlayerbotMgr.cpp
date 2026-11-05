@@ -189,12 +189,50 @@ void PlayerbotMgr::RequestCreate(BotFactory::CreateRequest const& request)
     _createRequests.push_back(request);
 }
 
+void PlayerbotMgr::RequestAssign(ObjectGuid const& bot, BotFactory::CreateRequest const& request)
+{
+    std::lock_guard<std::mutex> lock(_createLock);
+    _assignRequests.emplace_back(bot, request);
+}
+
+bool PlayerbotMgr::IsBotAccountName(std::string const& accountName) const
+{
+    std::string prefix = _createConfig.accountPrefix;
+    std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) { return char(std::toupper(c)); });
+    std::string name = accountName;
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return char(std::toupper(c)); });
+    return !prefix.empty() && name.rfind(prefix, 0) == 0;
+}
+
 void PlayerbotMgr::ProcessCreates(uint32 diff)
 {
     std::vector<BotFactory::CreateRequest> requests;
+    std::vector<std::pair<ObjectGuid, BotFactory::CreateRequest>> assigns;
     {
         std::lock_guard<std::mutex> lock(_createLock);
         requests.swap(_createRequests);
+        assigns.swap(_assignRequests);
+    }
+
+    // a masterless random bot accepted a player's invite: he becomes its master
+    for (auto const& assign : assigns)
+    {
+        auto itr = _bots.find(assign.first);
+        if (itr == _bots.end() || itr->second.removing || !itr->second.notifyGuid.IsEmpty())
+            continue;
+        Bot& bot = itr->second;
+        BotFactory::CreateRequest const& request = assign.second;
+        bot.notifyGuid = request.creator;
+        bot.toGMIsland = false;
+        bot.ownerGoneTimer = -1;
+        std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(request.creator, bot.session->GetAccountId(), true);
+        {
+            std::lock_guard<std::mutex> lock(_aiLock);
+            _ais[assign.first] = ai;
+        }
+        std::shared_ptr<BotFactory::CreateRequest> init = std::make_shared<BotFactory::CreateRequest>(request);
+        ObjectAccessor::PostToPlayer(assign.first, [ai, init](Player* p) -> void { ai->InitializeNewBot(p, *init); });
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' accepted an invite: it has a new master.", bot.name.c_str());
     }
 
     for (BotFactory::CreateRequest const& request : requests)
@@ -269,7 +307,7 @@ bool PlayerbotMgr::ReuseBot(BotFactory::CreateRequest const& request)
         best->notifyGuid = request.creator;
         best->toGMIsland = false;
         // a new AI: its master (constant, read from any thread by IsMaster) is the creator now
-        std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(request.creator, best->session->GetAccountId());
+        std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(request.creator, best->session->GetAccountId(), true);
         {
             std::lock_guard<std::mutex> lock(_aiLock);
             _ais[bestGuid] = ai;
@@ -428,7 +466,8 @@ void PlayerbotMgr::Update(uint32 diff)
                     bot.inWorld = true;
                     {
                         std::lock_guard<std::mutex> lock(_aiLock);
-                        _ais[itr->first] = std::make_shared<PlayerbotAI>(bot.notifyGuid, session->GetAccountId());
+                        _ais[itr->first] = std::make_shared<PlayerbotAI>(bot.notifyGuid, session->GetAccountId(),
+                            IsBotAccountName(session->GetAccountName()));
                     }
                     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' logged in (map %u).", bot.name.c_str(), player->GetMapId());
                     // SquidBots Lite (SkyFire) parses this exact text: keep the wording

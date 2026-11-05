@@ -124,7 +124,41 @@ void PlayerbotAI::HandleGroupInvite(Player* bot)
 
     _answeredInvite = invite;
     ObjectGuid const leader = invite->GetLeaderGUID();
-    bool const accept = IsMaster(leader, ObjectMgr::GetPlayerAccountIdByGUID(leader));
+    bool accept = IsMaster(leader, ObjectMgr::GetPlayerAccountIdByGUID(leader));
+
+    // Owner's rule (2026-11-05): a random bot with no master accepts any player's invite and becomes his bot
+    // (set up to his level and summoned to him, as by ".playerbots create"); one with a master says so.
+    if (!accept && _randomBot)
+    {
+        if (_master.IsEmpty() && _pendingMaster.IsEmpty())
+        {
+            // the inviter may stand on another map: read what is needed under the accessor lock
+            BotFactory::CreateRequest request;
+            bool isPlayer = false;
+            ObjectAccessor::WithPlayer(leader, [&](Player* inviter)
+            {
+                WorldSession* session = inviter->GetSession();
+                if (!session || session->IsBot())
+                    return;
+                isPlayer = true;
+                request.level = inviter->getLevel();
+                request.team = inviter->GetTeam();
+                request.location = WorldLocation(inviter->GetMapId(), inviter->GetPositionX(), inviter->GetPositionY(),
+                    inviter->GetPositionZ(), inviter->GetOrientation());
+                request.creator = inviter->GetGUID();
+                request.creatorAccount = session->GetAccountId();
+            });
+            if (isPlayer)
+            {
+                accept = true;
+                request.cls = bot->getClass();
+                _pendingMaster = leader;
+                sPlayerbotMgr->RequestAssign(bot->GetGUID(), request);
+            }
+        }
+        else
+            Say(bot, leader, "I already have a master, try another bot.");
+    }
 
     // PartyInviteResponse::Read: int8 PartyIndex, bit Accept, bit HasRolesDesired
     WorldPacket* packet = new WorldPacket(CMSG_PARTY_INVITE_RESPONSE, 2);
@@ -1554,19 +1588,32 @@ void PlayerbotAI::TalentsOrder(Player* bot, OrderSender const& sender, std::stri
 // by the "leave" order. LogoutBot only raises a flag: the session logs the character out on its own thread.
 void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
 {
-    if (_master.IsEmpty())
-        return;
-
     Group* group = bot->GetGroup();
-    if (group && group->IsMember(_master))
+    if (!group)
+        _leaveQueued = false;
+
+    // the master, or the player whose invite a masterless random bot just accepted
+    ObjectGuid const owner = !_master.IsEmpty() ? _master : _pendingMaster;
+    if (group && !owner.IsEmpty() && group->IsMember(owner))
     {
-        _wasWithOwner = true;
+        _wasWithOwner = !_master.IsEmpty();
         _leftByOrder = false;
         _groupLogoutTimer = -1;
         return;
     }
 
-    if (!_wasWithOwner || _leftByOrder)
+    // Owner's rule (2026-11-05): a random bot never stays in a party without its master (a party of bots
+    // left behind by a leader who left): it leaves, so it is free for another player.
+    if (_randomBot && group && !_leaveQueued)
+    {
+        _leaveQueued = true;
+        WorldPacket* packet = new WorldPacket(CMSG_LEAVE_GROUP, 1);
+        *packet << int8(0);
+        bot->GetSession()->QueuePacket(packet);
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves a party without its master.", bot->GetName());
+    }
+
+    if (_master.IsEmpty() || !_wasWithOwner || _leftByOrder)
         return;
 
     if (_groupLogoutTimer < 0)
