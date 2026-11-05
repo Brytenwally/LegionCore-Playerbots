@@ -26,6 +26,16 @@ namespace BotGear
         uint32 maxQuality = 4;          // epic
         uint32 maxItemLevel = 0;        // 0 = no limit (the bot's level still limits by required level)
         bool destroyReplaced = false;   // a new bot's starting gear is destroyed, otherwise it goes to the bags
+
+        // item level cap by bot level (owner's values, 2026-11-05; Playerbots.AutoGear.IlvlCap.*): below 60
+        // level + belowSixtyAdd, then level x the bracket's factor; 110 has only maxItemLevel
+        float belowSixtyAdd = 6.0f;
+        float factor60 = 1.3f;          // 60-69
+        float factor70 = 2.0f;          // 70-79
+        float factor80 = 2.8f;          // 80-84
+        float factor85 = 4.6f;          // 85-89
+        float factor90 = 5.8f;          // 90-99
+        float factor100 = 7.0f;         // 100-109
     };
 
     struct Result

@@ -158,16 +158,22 @@ namespace BotGear
             return proto->GetBaseItemLevel();
         }
 
-        // Highest item level for a bot level (LegionBotAI's IlvlCapForLevel). Needed because many quest
-        // rewards have no required level: the owner saw a level 15 bot take item level 840 quest rewards
-        // (2026-11-05, build #21).
-        uint32 ItemLevelCapFor(uint8 level)
+        // Highest item level for a bot level. Needed because many quest rewards have no required level: the
+        // owner saw a level 15 bot take item level 840 quest rewards (build #21), and LegionBotAI's caps
+        // were still too generous (build #22); the brackets and their values are the owner's.
+        uint32 ItemLevelCapFor(uint8 level, Options const& options)
         {
-            if (level <= 60)  return level * 2 + 6;
-            if (level <= 80)  return level * 3;
-            if (level <= 90)  return level * 5;
-            if (level <= 100) return level * 8;
-            return 0;                                       // 101-110: no cap (Legion items)
+            float cap;
+            if (level < 60)       cap = level + options.belowSixtyAdd;
+            else if (level < 70)  cap = level * options.factor60;
+            else if (level < 80)  cap = level * options.factor70;
+            else if (level < 85)  cap = level * options.factor80;
+            else if (level < 90)  cap = level * options.factor85;
+            else if (level < 100) cap = level * options.factor90;
+            else if (level < 110) cap = level * options.factor100;
+            else
+                return 0;                                   // 110: only Playerbots.AutoGear.MaxItemLevel
+            return uint32(std::max(1.0f, cap));
         }
     }
 
@@ -242,7 +248,7 @@ namespace BotGear
             return result;
 
         uint8 const level = bot->getLevel();
-        uint32 const levelCap = ItemLevelCapFor(level);
+        uint32 const levelCap = ItemLevelCapFor(level, options);
         uint32 const armorType = WornArmorType(bot);
         Hands const hands = HandsFor(spec);
 

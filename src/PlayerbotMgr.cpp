@@ -38,6 +38,13 @@ void PlayerbotMgr::LoadConfig()
     _gearOptions.minQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MinQuality", 0), 5);
     _gearOptions.maxQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxQuality", 4), 5);
     _gearOptions.maxItemLevel = sConfigMgr->GetIntDefault("Playerbots.AutoGear.MaxItemLevel", 0);
+    _gearOptions.belowSixtyAdd = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Below60Add", 6.0f);
+    _gearOptions.factor60 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor60", 1.3f);
+    _gearOptions.factor70 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor70", 2.0f);
+    _gearOptions.factor80 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor80", 2.8f);
+    _gearOptions.factor85 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor85", 4.6f);
+    _gearOptions.factor90 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor90", 5.8f);
+    _gearOptions.factor100 = sConfigMgr->GetFloatDefault("Playerbots.AutoGear.IlvlCap.Factor100", 7.0f);
 
     _createConfig.accountPrefix = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPrefix", "PLAYERBOT");
     _createConfig.accountPassword = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPassword", "playerbot");

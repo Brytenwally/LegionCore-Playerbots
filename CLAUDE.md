@@ -352,9 +352,11 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
 - **Owner's test of build #21 (2026-11-05):** `.playerbots create` and `talents` **work**; gear is
   right for the spec, but **autogear took item level 840 quest rewards on a level 15 bot**: many
   quest rewards have no required level, so the required-level filter let them through. Fix:
-  an item level cap by bot level (`ItemLevelCapFor`, LegionBotAI's `IlvlCapForLevel`: level x2+6
-  up to 60, x3 up to 80, x5 up to 90, x8 up to 100, none at 101-110), on top of
-  `Playerbots.AutoGear.MaxItemLevel`. **Rule: never trust required level alone for gear.**
+  an item level cap by bot level (`ItemLevelCapFor`), on top of `Playerbots.AutoGear.MaxItemLevel`.
+  **Rule: never trust required level alone for gear.** LegionBotAI's caps (x2+6 / x3 / x5 / x8) were
+  still too generous (owner, build #22): now the owner's brackets, configurable
+  (`Playerbots.AutoGear.IlvlCap.*`, `BotGear::Options`): levels 1-59 level + 6, 60-69 x1.3, 70-79
+  x2, 80-84 x2.8, 85-89 x4.6, 90-99 x5.8, 100-109 x7, 110 only `MaxItemLevel`.
 - **Owner's requests after that test (2026-11-05):**
   - A created bot **joins its creator's party**: 3 s after its setup, `PlayerbotAI::SendCreatorInvite`
     queues `CMSG_PARTY_INVITE` on the creator's session (`sWorld->FindSession(creatorAccount)`,
@@ -377,6 +379,18 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
     ... FROM characters WHERE online = 0 AND account IN (bot accounts) AND class = ?`), logged in
     with the setup pending. Only when neither exists is a new character made. Bot accounts =
     `SELECT id FROM account WHERE username LIKE '<PREFIX>%'` (prefix reduced to letters/digits).
+- **Starting zones** (owner's rule, 2026-11-05): a random bot is initialized as having done its
+  race's own starting zone (worgen: Gilneas, Gilneas City; goblin: Kezan, The Lost Isles; pandaren:
+  The Wandering Isle) and its hero class's (death knight: Plaguelands: The Scarlet Enclave; demon
+  hunter: Mardum, the Shattered Abyss and Vault of the Wardens). `BotFactory::CompleteStartingZones`,
+  first in `InitializeNewBot` (created and reused bots, always bot accounts): zones by `AreaTable`
+  `AreaName` (all ids of those names; a quest's `QuestSortID` > 0 is its zone id), then every quest
+  of them that is not repeatable/daily/weekly/seasonal and whose class/race the bot satisfies
+  (`SatisfyQuestClass/Race`): removed from the log if there (`RemoveActiveQuest`),
+  `SetRewardedQuest` (saved with `SaveToDB`), and the `SPELL_EFFECT_LEARN_SPELL` effects of its
+  `RewardSpell` / `RewardDisplaySpell` learned (no XP, items or scripts); then
+  `UpdateAreaDependentAuras`. Logged: `starting zone done (N quests marked complete)`, or an error
+  if no AreaTable entry has those names.
 - Not yet: Warrior and Demon Hunter talent builds, gems/enchants, bonus IDs (item
   levels are the templates' base levels), artifact weapons (AshamaneCore's table, step 5),
   `Game.Patch` item level tiers.

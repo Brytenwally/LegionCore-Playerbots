@@ -19,6 +19,8 @@
 #include "ScriptMgr.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "QuestData.h"
+#include "QuestDef.h"
 #include "World.h"
 #include "WorldSession.h"
 #include <algorithm>
@@ -413,8 +415,109 @@ namespace BotFactory
         return name;
     }
 
+    namespace
+    {
+        // Starting zones a random bot must have done (owner's rule, 2026-11-05): races with their own
+        // starting zone (worgen, goblin, pandaren) and the hero classes (death knight, demon hunter).
+        // Zones by AreaTable name, resolved once (QuestSortID > 0 is the quest's zone id).
+        std::vector<char const*> StartingZoneNames(uint8 race, uint8 cls)
+        {
+            std::vector<char const*> names;
+            switch (race)
+            {
+                case RACE_WORGEN:            names = { "Gilneas", "Gilneas City" }; break;
+                case RACE_GOBLIN:            names = { "Kezan", "The Lost Isles" }; break;
+                case RACE_PANDAREN_NEUTRAL:
+                case RACE_PANDAREN_ALLIANCE:
+                case RACE_PANDAREN_HORDE:    names = { "The Wandering Isle" }; break;
+                default: break;
+            }
+            if (cls == CLASS_DEATH_KNIGHT)
+                names.push_back("Plaguelands: The Scarlet Enclave");
+            else if (cls == CLASS_DEMON_HUNTER)
+            {
+                names.push_back("Mardum, the Shattered Abyss");
+                names.push_back("Vault of the Wardens");
+            }
+            return names;
+        }
+
+        std::set<uint32> AreaIdsNamed(std::vector<char const*> const& names)
+        {
+            std::set<uint32> ids;
+            for (AreaTableEntry const* area : sAreaTableStore)
+            {
+                char const* areaName = area->AreaName ? area->AreaName->Str[LOCALE_enUS] : nullptr;
+                if (!areaName)
+                    continue;
+                for (char const* name : names)
+                    if (Lower(areaName) == Lower(name))
+                        ids.insert(uint32(area->ID));
+            }
+            return ids;
+        }
+
+        // the reward spell's learned spells (worgen forms and the like); other effects are left out
+        void LearnRewardSpell(Player* bot, uint32 spellId)
+        {
+            SpellInfo const* spellInfo = spellId ? sSpellMgr->GetSpellInfo(spellId) : nullptr;
+            if (!spellInfo)
+                return;
+            for (SpellEffectInfo const* effect : spellInfo->Effects)
+                if (effect && effect->Effect == SPELL_EFFECT_LEARN_SPELL && effect->TriggerSpell && !bot->HasSpell(effect->TriggerSpell))
+                    bot->learnSpell(effect->TriggerSpell, false);
+        }
+    }
+
+    uint32 CompleteStartingZones(Player* bot)
+    {
+        std::vector<char const*> const names = StartingZoneNames(bot->getRace(), bot->getClass());
+        if (names.empty())
+            return 0;
+
+        std::set<uint32> const zones = AreaIdsNamed(names);
+        if (zones.empty())
+        {
+            TC_LOG_ERROR("server.loading", "[mod-playerbots] Bot '%s': no AreaTable entry found for its starting zone.", bot->GetName());
+            return 0;
+        }
+
+        uint32 done = 0;
+        for (auto const& pair : sQuestDataStore->GetQuestTemplates())
+        {
+            Quest const* quest = pair.second;
+            if (!quest || quest->QuestSortID <= 0 || !zones.count(uint32(quest->QuestSortID)))
+                continue;
+            if (quest->IsRepeatable() || quest->IsDailyOrWeekly() || quest->IsSeasonal())
+                continue;
+            if (!bot->SatisfyQuestClass(quest, false) || !bot->SatisfyQuestRace(quest, false))
+                continue;
+            uint32 const questId = quest->GetQuestId();
+            if (bot->IsQuestRewarded(questId))
+                continue;
+
+            if (bot->FindQuestSlot(questId) < MAX_QUEST_LOG_SIZE)
+                bot->RemoveActiveQuest(questId);
+            bot->SetRewardedQuest(questId);
+            LearnRewardSpell(bot, uint32(std::max(0, quest->RewardSpell)));
+            for (uint32 displaySpell : quest->RewardDisplaySpell)
+                LearnRewardSpell(bot, displaySpell);
+            ++done;
+        }
+
+        if (done)
+        {
+            // phases follow quest state
+            bot->UpdateAreaDependentAuras(bot->GetAreaId());
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s': starting zone done (%u quests marked complete).", bot->GetName(), done);
+        }
+        return done;
+    }
+
     std::string InitializeNewBot(Player* bot, CreateRequest const& request)
     {
+        CompleteStartingZones(bot);
+
         if (request.level > bot->getLevel())
         {
             bot->GiveLevel(request.level);

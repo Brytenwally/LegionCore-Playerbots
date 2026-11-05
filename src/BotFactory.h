@@ -77,6 +77,12 @@ namespace BotFactory
     // sets error.
     std::string CreateCharacter(CreateRequest const& request, CreateConfig const& config, std::string& error);
 
+    // Owner's rule: a random bot has done its race's own starting zone (worgen, goblin, pandaren) and its
+    // hero class's (death knight, demon hunter): every quest of those zones its race/class can take is
+    // marked rewarded (removed from the log if there), the learn-spell effects of their reward spells are
+    // learned. Returns the number of quests marked. Bot's thread.
+    uint32 CompleteStartingZones(Player* bot);
+
     // Bot's thread, once in the world: level, spec, talents, gear, then off to the creator.
     // Returns what was done, for the creator.
     std::string InitializeNewBot(Player* bot, CreateRequest const& request);
