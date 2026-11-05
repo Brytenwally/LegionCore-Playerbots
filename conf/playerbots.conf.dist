@@ -10,8 +10,8 @@
 #
 #    Playerbots.Enable
 #        Master switch for the playerbots module (the .playerbots GM commands).
-#        Default: 0 - (Disabled)
-#                 1 - (Enabled)
+#        Default: 1 - (Enabled)
+#                 0 - (Disabled)
 
 Playerbots.Enable = 1
 
@@ -127,8 +127,10 @@ Playerbots.AutoGear.IlvlCap.Factor100 = 7.0
 #        logs LoginAtStartup of them in; they wait on GM Island. ".playerbots create <class>" first
 #        takes a free logged-in bot, then an offline bot character, of that class, of the GM's faction
 #        and at most his level, levels and sets it up and brings it into his party; only when there is
-#        none is a new character made. 0 turns each part off.
-#        Default: 2, 20, 5
+#        none is a new character made. 0 turns each part off. The pool is built a few accounts,
+#        characters and logins per world update, so the first startup with a large pool keeps
+#        working while it fills (watch "Bot pool:" in the log).
+#        Default: 100, 600, 50
 
 Playerbots.Pool.Accounts = 100
 Playerbots.Pool.Characters = 600

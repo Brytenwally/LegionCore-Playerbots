@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cctype>
 #include <mutex>
+#include <map>
 #include <set>
 
 namespace BotFactory
@@ -246,36 +247,33 @@ namespace BotFactory
         return 0;
     }
 
-    void EnsurePool(CreateConfig const& config)
+    bool EnsureAccount(CreateConfig const& config, uint32 n, uint32& accountId, std::string& accountName)
     {
-        for (uint32 n = 1; n <= config.poolAccounts; ++n)
-        {
-            std::string const name = config.accountPrefix + std::to_string(n);
-            if (!AccountMgr::GetId(name) && AccountMgr::CreateAccount(name, config.accountPassword, false) == AccountOpResult::AOR_OK)
-                TC_LOG_INFO("server.loading", "[mod-playerbots] Created bot account %s.", name.c_str());
-        }
+        accountName = config.accountPrefix + std::to_string(n);
+        accountId = AccountMgr::GetId(accountName);
+        if (accountId)
+            return false;
+        if (AccountMgr::CreateAccount(accountName, config.accountPassword, false) != AccountOpResult::AOR_OK)
+            return false;
+        accountId = AccountMgr::GetId(accountName);
+        if (accountId)
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Created bot account %s.", accountName.c_str());
+        return accountId != 0;
+    }
 
-        uint32 const have = CountCharacters(BotAccountIds(config));
-        if (have >= config.poolCharacters)
-            return;
-
-        static uint8 const classes[] = { CLASS_WARRIOR, CLASS_PALADIN, CLASS_HUNTER, CLASS_ROGUE, CLASS_PRIEST, CLASS_SHAMAN,
-            CLASS_MAGE, CLASS_WARLOCK, CLASS_MONK, CLASS_DRUID, CLASS_DEATH_KNIGHT, CLASS_DEMON_HUNTER };
-        uint32 made = 0;
-        for (uint32 i = have; i < config.poolCharacters; ++i)
-        {
-            CreateRequest request;
-            request.cls = classes[i % std::size(classes)];
-            request.team = (i / std::size(classes)) % 2 ? HORDE : ALLIANCE;
-            std::string error;
-            if (CreateCharacter(request, config, error).empty())
-            {
-                TC_LOG_ERROR("server.loading", "[mod-playerbots] Bot pool: %s", error.c_str());
-                break;
-            }
-            ++made;
-        }
-        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: %u character(s) made, %u in all.", made, have + made);
+    std::map<uint32, uint32> CharacterCounts(std::vector<uint32> const& accounts)
+    {
+        std::map<uint32, uint32> counts;
+        for (uint32 id : accounts)
+            counts[id] = 0;
+        if (accounts.empty())
+            return counts;
+        std::string const query = "SELECT account, COUNT(*) FROM characters WHERE account IN (" + IdList(accounts) + ") GROUP BY account";
+        if (QueryResult result = CharacterDatabase.Query(query.c_str()))
+            do
+                counts[(*result)[0].GetUInt32()] = uint32((*result)[1].GetUInt64());
+            while (result->NextRow());
+        return counts;
     }
 
     uint8 ClassFromName(std::string name)
@@ -339,7 +337,8 @@ namespace BotFactory
         return 0;
     }
 
-    std::string CreateCharacter(CreateRequest const& request, CreateConfig const& config, std::string& error)
+    std::string CreateCharacter(CreateRequest const& request, CreateConfig const& config, std::string& error,
+        uint32 onAccountId, std::string const& onAccountName)
     {
         std::vector<uint8> races;
         for (uint8 race : RacesOf(request.team))
@@ -351,8 +350,8 @@ namespace BotFactory
             return std::string();
         }
 
-        std::string accountName;
-        uint32 const accountId = FindBotAccount(config, accountName, error);
+        std::string accountName = onAccountName;
+        uint32 const accountId = onAccountId ? onAccountId : FindBotAccount(config, accountName, error);
         if (!accountId)
             return std::string();
 

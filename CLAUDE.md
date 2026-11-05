@@ -364,12 +364,18 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
     ProposedRoles, packed guid, 9 bits name length, 9 bits realm length, name, realm), so the
     core's `HandlePartyInvite` runs on his thread as for `/invite`; the bot accepts it like any
     master's invite. `CreateRequest::creatorAccount` is read in the GM's thread.
-  - **Startup pool**: `PlayerbotMgr::UpdatePool` (first world update, `Playerbots.Enable` only):
-    `BotFactory::EnsurePool` makes accounts `<prefix>1..Playerbots.Pool.Accounts` (2) and bot
-    characters up to `Playerbots.Pool.Characters` (20, counted over all `<prefix>%` accounts;
-    classes in turn, factions alternating, starting level); 5 s later
-    `Playerbots.Pool.LoginAtStartup` (5) offline ones log in with no master and are teleported to
-    GM Island (map 1, 16222.1 16252.1 12.59).
+  - **Startup pool**: `PlayerbotMgr::UpdatePool` (`Playerbots.Enable` only): accounts
+    `<prefix>1..Playerbots.Pool.Accounts` and bot characters up to `Playerbots.Pool.Characters`
+    (counted over all `<prefix>%` accounts; classes in turn, factions alternating, starting level);
+    5 s later `Playerbots.Pool.LoginAtStartup` offline ones log in with no master and are teleported
+    to GM Island (map 1, 16222.1 16252.1 12.59). The owner's defaults (his edit of the conf.dist,
+    2026-11-05): `Playerbots.Enable = 1`, 100 accounts, 600 characters, 50 logins. **Built in small
+    steps per world update** (`PoolStage`: up to 20 account checks but one new account per update,
+    since `AccountMgr::CreateAccount` hashes the password with Argon2; 2 characters per update
+    with the per-account counts cached (`CharacterCounts`, one query) instead of 2 queries per
+    account per character; 5 logins per update): built in one go, those values would hold the
+    world thread for minutes (`MaxCoreStuckTime` kills a frozen server when enabled). **Rule: never
+    do unbounded synchronous DB / hashing work in one world update.**
   - **`.playerbots create` reuses before creating** (`ReuseBot`): first a logged-in bot of a bot
     account with no master (the pool), of the class, the creator's faction
     (`Player::TeamForRace`) and at most his level, highest level first, read from

@@ -17,6 +17,7 @@
 #include "Define.h"
 #include "ObjectGuid.h"
 #include "Position.h"
+#include <map>
 #include <string>
 #include <vector>
 
@@ -61,8 +62,10 @@ namespace BotFactory
     // offline (online = 0) bot characters, of a class or any (cls 0)
     std::vector<StoredBot> OfflineBots(std::vector<uint32> const& accounts, uint8 cls);
     uint32 CountCharacters(std::vector<uint32> const& accounts);
-    // makes the missing pool accounts and characters (classes in turn, factions alternating)
-    void EnsurePool(CreateConfig const& config);
+    // account <prefix><n>: made if missing (true when it was made now: a slow password hash); id and name out
+    bool EnsureAccount(CreateConfig const& config, uint32 n, uint32& accountId, std::string& accountName);
+    // characters per bot account (0 included)
+    std::map<uint32, uint32> CharacterCounts(std::vector<uint32> const& accounts);
 
     // class from a name ("warrior", "dk", "demon hunter"...), 0 if unknown
     uint8 ClassFromName(std::string name);
@@ -75,7 +78,9 @@ namespace BotFactory
 
     // World thread. Creates the account if needed and the character; returns its name, or empty and
     // sets error.
-    std::string CreateCharacter(CreateRequest const& request, CreateConfig const& config, std::string& error);
+    // onAccountId (and its name): the account to use; 0 = the first bot account with room (made if needed)
+    std::string CreateCharacter(CreateRequest const& request, CreateConfig const& config, std::string& error,
+        uint32 onAccountId = 0, std::string const& onAccountName = std::string());
 
     // Owner's rule: a random bot has done its race's own starting zone (worgen, goblin, pandaren) and its
     // hero class's (death knight, demon hunter): every quest of those zones its race/class can take is

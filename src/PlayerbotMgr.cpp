@@ -343,40 +343,138 @@ bool PlayerbotMgr::ReuseBot(BotFactory::CreateRequest const& request)
 
 // Startup pool (owner's request, 2026-11-05): Playerbots.Pool.Accounts bot accounts and
 // Playerbots.Pool.Characters bot characters exist; Playerbots.Pool.LoginAtStartup of them log in and wait
-// on GM Island until ".playerbots create" takes one.
+// on GM Island until ".playerbots create" or a player's invite takes one. Built in small steps per world
+// update (see PlayerbotMgr.h).
 void PlayerbotMgr::UpdatePool(uint32 diff)
 {
-    if (!_poolMade)
-    {
-        _poolMade = true;
-        BotFactory::EnsurePool(_createConfig);
-        if (_createConfig.poolLogins)
-            _poolLoginDelay = 5000;                         // new characters' rows must reach the database first
-        return;
-    }
+    uint32 const AccountChecksPerUpdate = 20;
+    uint32 const CharactersPerUpdate = 2;
+    uint32 const LoginsPerUpdate = 5;
 
-    if (_poolLoginDelay < 0)
-        return;
-    _poolLoginDelay -= int32(diff);
-    if (_poolLoginDelay > 0)
-        return;
-    _poolLoginDelay = -1;
-
-    uint32 started = 0;
-    for (BotFactory::StoredBot const& stored : BotFactory::OfflineBots(BotFactory::BotAccountIds(_createConfig), 0))
+    switch (_poolStage)
     {
-        if (started >= _createConfig.poolLogins)
+        case PoolStage::Start:
+            _poolStage = PoolStage::Accounts;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: %u account(s), %u character(s), %u login(s) at startup.",
+                _createConfig.poolAccounts, _createConfig.poolCharacters, _createConfig.poolLogins);
             break;
-        if (_bots.find(stored.guid) != _bots.end())
-            continue;
-        std::string error;
-        if (!AddBot(stored.name, ObjectGuid::Empty, error))
-            continue;
-        if (Bot* bot = FindBotByName(stored.name))
-            bot->toGMIsland = true;
-        ++started;
+
+        case PoolStage::Accounts:
+            // existing accounts are cheap to check; at most one new account (password hash) per update
+            for (uint32 checks = 0; checks < AccountChecksPerUpdate && _poolNextAccount <= _createConfig.poolAccounts; ++checks)
+            {
+                uint32 id = 0;
+                std::string name;
+                bool const made = BotFactory::EnsureAccount(_createConfig, _poolNextAccount++, id, name);
+                if (made)
+                    break;
+            }
+            if (_poolNextAccount > _createConfig.poolAccounts)
+            {
+                std::vector<uint32> const ids = BotFactory::BotAccountIds(_createConfig);
+                _poolCounts = BotFactory::CharacterCounts(ids);
+                _poolTotal = 0;
+                for (auto const& pair : _poolCounts)
+                {
+                    _poolTotal += pair.second;
+                    std::string name;
+                    if (AccountMgr::GetName(pair.first, name))
+                        _poolNames[pair.first] = name;
+                }
+                _poolStage = PoolStage::Characters;
+            }
+            break;
+
+        case PoolStage::Characters:
+            for (uint32 made = 0; made < CharactersPerUpdate; ++made)
+            {
+                if (_poolTotal >= _createConfig.poolCharacters)
+                {
+                    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: %u character(s) made, %u in all.", _poolMade, _poolTotal);
+                    _poolStage = PoolStage::WaitLogins;
+                    _poolTimer = 5000;                      // new characters' rows must reach the database first
+                    break;
+                }
+
+                // the first bot account with room; a new one (next update) when all are full
+                uint32 accountId = 0;
+                for (auto const& pair : _poolCounts)
+                    if (pair.second < _createConfig.charactersPerAccount && _poolNames.count(pair.first))
+                    {
+                        accountId = pair.first;
+                        break;
+                    }
+                if (!accountId)
+                {
+                    uint32 id = 0;
+                    std::string name;
+                    BotFactory::EnsureAccount(_createConfig, _poolNextAccount++, id, name);
+                    if (id && !_poolCounts.count(id))
+                    {
+                        _poolCounts[id] = 0;
+                        _poolNames[id] = name;
+                    }
+                    break;
+                }
+
+                static uint8 const classes[] = { CLASS_WARRIOR, CLASS_PALADIN, CLASS_HUNTER, CLASS_ROGUE, CLASS_PRIEST, CLASS_SHAMAN,
+                    CLASS_MAGE, CLASS_WARLOCK, CLASS_MONK, CLASS_DRUID, CLASS_DEATH_KNIGHT, CLASS_DEMON_HUNTER };
+                BotFactory::CreateRequest request;
+                request.cls = classes[_poolTotal % std::size(classes)];
+                request.team = (_poolTotal / std::size(classes)) % 2 ? HORDE : ALLIANCE;
+                std::string error;
+                if (BotFactory::CreateCharacter(request, _createConfig, error, accountId, _poolNames[accountId]).empty())
+                {
+                    TC_LOG_ERROR("server.loading", "[mod-playerbots] Bot pool: %s Stopping at %u character(s).", error.c_str(), _poolTotal);
+                    _poolStage = PoolStage::WaitLogins;
+                    _poolTimer = 5000;
+                    break;
+                }
+                ++_poolCounts[accountId];
+                ++_poolTotal;
+                ++_poolMade;
+            }
+            break;
+
+        case PoolStage::WaitLogins:
+            if (!_createConfig.poolLogins)
+            {
+                _poolStage = PoolStage::Done;
+                break;
+            }
+            _poolTimer -= int32(diff);
+            if (_poolTimer > 0)
+                break;
+            _poolToLogin = BotFactory::OfflineBots(BotFactory::BotAccountIds(_createConfig), 0);
+            _poolLoginIndex = 0;
+            _poolStage = PoolStage::Logins;
+            break;
+
+        case PoolStage::Logins:
+            for (uint32 started = 0; started < LoginsPerUpdate; ++started)
+            {
+                if (_poolLoggedIn >= _createConfig.poolLogins || _poolLoginIndex >= _poolToLogin.size())
+                {
+                    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: %u bot(s) logging in to GM Island.", _poolLoggedIn);
+                    _poolToLogin.clear();
+                    _poolStage = PoolStage::Done;
+                    break;
+                }
+                BotFactory::StoredBot const& stored = _poolToLogin[_poolLoginIndex++];
+                if (_bots.find(stored.guid) != _bots.end())
+                    continue;
+                std::string error;
+                if (!AddBot(stored.name, ObjectGuid::Empty, error))
+                    continue;
+                if (Bot* bot = FindBotByName(stored.name))
+                    bot->toGMIsland = true;
+                ++_poolLoggedIn;
+            }
+            break;
+
+        case PoolStage::Done:
+            break;
     }
-    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: logging in %u bot(s) to GM Island.", started);
 }
 
 void PlayerbotMgr::Update(uint32 diff)

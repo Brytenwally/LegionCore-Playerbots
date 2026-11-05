@@ -95,9 +95,21 @@ private:
     // ".playerbots create": an idle logged-in pool bot, else an offline bot character, of the class and the
     // creator's faction and at most his level; false when there is none (a new one is made)
     bool ReuseBot(BotFactory::CreateRequest const& request);
+    // The startup pool is built a little each world update (a few accounts / characters / logins), not in one
+    // go: 100 accounts (each a deliberately slow Argon2 hash) and 600 characters at once would hold the world
+    // thread for minutes (MaxCoreStuckTime).
     void UpdatePool(uint32 diff);
-    bool _poolMade = false;
-    int32 _poolLoginDelay = -1;                             // ms until the startup logins, -1 = none pending
+    enum class PoolStage : uint8 { Start, Accounts, Characters, WaitLogins, Logins, Done };
+    PoolStage _poolStage = PoolStage::Start;
+    uint32 _poolNextAccount = 1;
+    std::map<uint32, uint32> _poolCounts;                   // bot account -> characters
+    std::map<uint32, std::string> _poolNames;               // bot account -> name
+    uint32 _poolTotal = 0;
+    uint32 _poolMade = 0;
+    int32 _poolTimer = 0;
+    std::vector<BotFactory::StoredBot> _poolToLogin;
+    size_t _poolLoginIndex = 0;
+    uint32 _poolLoggedIn = 0;
 
     struct PendingLogin
     {
