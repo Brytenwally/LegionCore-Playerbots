@@ -148,12 +148,13 @@ come first.
   limits, bag room, `CompleteQuest` if needed (owner's rule: objectives do not matter),
   `RewardQuest(quest, reward, giver or bot)`.
 
-## Combat building blocks (`src/combat/`, from LegionBotAI, not used yet)
+## Combat building blocks (`src/combat/`, from LegionBotAI; used by "Combat" below)
 
 Owner's request (2026-11-03): copy LegionBotAI's generic functions as an empty structure before
 writing combat, without its content (rotations, spell lists, gear sets, talent picks) and without
 what conflicts with the module (its follow, map transfer by hand, settings table, level sync and
-gear, looting, LFG, revive). Nothing calls them yet; plan step 4 wires them into `PlayerbotAI`.
+gear, looting, LFG, revive). Since 2026-11-05 `PlayerbotAI`'s combat uses `BotCast`, the targeting
+helpers, `TryDispel` and `GetInterruptibleCast`; `BotTalents`, `BotMovement` and `UseBagItem` wait.
 All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group slots +
 `ObjectAccessor::GetPlayer(*bot, guid)`, same map only) instead of LegionBotAI's `FindPlayer`.
 - `BotCombat` (`BotCombat.h`): `RoleOf` (spec role), `BotCast` (what casting means: spell exists,
