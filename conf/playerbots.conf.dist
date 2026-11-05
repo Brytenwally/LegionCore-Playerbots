@@ -13,7 +13,7 @@
 #        Default: 0 - (Disabled)
 #                 1 - (Enabled)
 
-Playerbots.Enable = 0
+Playerbots.Enable = 1
 
 #
 #    Playerbots.Summon.Revive
@@ -96,27 +96,6 @@ Playerbots.AutoGear.MaxQuality = 4
 Playerbots.AutoGear.MaxItemLevel = 0
 
 #
-#    Playerbots.AutoGear.IlvlCap.*
-#        Highest item level autogear picks for a bot's level (quest rewards often have no required
-#        level, so this is what keeps a low bot out of high gear). Below 60: level + Below60Add; from
-#        60: level x the bracket's factor; at 110 only MaxItemLevel applies.
-#        Below60Add  (levels 1-59)    Default: 6
-#        Factor60    (levels 60-69)   Default: 1.3
-#        Factor70    (levels 70-79)   Default: 2.0
-#        Factor80    (levels 80-84)   Default: 2.8
-#        Factor85    (levels 85-89)   Default: 4.6
-#        Factor90    (levels 90-99)   Default: 5.8
-#        Factor100   (levels 100-109) Default: 7.0
-
-Playerbots.AutoGear.IlvlCap.Below60Add = 6
-Playerbots.AutoGear.IlvlCap.Factor60 = 1.3
-Playerbots.AutoGear.IlvlCap.Factor70 = 2.0
-Playerbots.AutoGear.IlvlCap.Factor80 = 2.8
-Playerbots.AutoGear.IlvlCap.Factor85 = 4.6
-Playerbots.AutoGear.IlvlCap.Factor90 = 5.8
-Playerbots.AutoGear.IlvlCap.Factor100 = 7.0
-
-#
 #    Playerbots.Pool.Accounts
 #    Playerbots.Pool.Characters
 #    Playerbots.Pool.LoginAtStartup
@@ -128,6 +107,6 @@ Playerbots.AutoGear.IlvlCap.Factor100 = 7.0
 #        none is a new character made. 0 turns each part off.
 #        Default: 2, 20, 5
 
-Playerbots.Pool.Accounts = 2
-Playerbots.Pool.Characters = 20
-Playerbots.Pool.LoginAtStartup = 5
+Playerbots.Pool.Accounts = 100
+Playerbots.Pool.Characters = 600
+Playerbots.Pool.LoginAtStartup = 50
