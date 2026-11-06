@@ -772,6 +772,8 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   a bot leaving a dungeon finder group did not queue the group for a replacement (core bug, fixed, see "Dungeon
   finder"). His log: 28 SimC profiles loaded, `Talent builds: 31 specs, 0 name(s) not found`; the unknown APL names
   and terms it listed were fixed in the commit after.
+- 2026-11-06, owner's test of build #29 (allied races from level 10, `Playerbots.DeleteBotAccounts`): **works
+  perfectly**.
 
 ## Checking
 
