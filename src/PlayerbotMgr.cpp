@@ -90,6 +90,8 @@ void PlayerbotMgr::LoadConfig()
     _createConfig.accountPrefix = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPrefix", "PLAYERBOT");
     _createConfig.accountPassword = sConfigMgr->GetStringDefault("Playerbots.Create.AccountPassword", "playerbot");
     _createConfig.charactersPerAccount = std::max<uint32>(1, sConfigMgr->GetIntDefault("Playerbots.Create.CharactersPerAccount", 10));
+    _createConfig.alliedRaceLevel = uint8(std::min(110, std::max(1, sConfigMgr->GetIntDefault("Playerbots.Create.AlliedRaceLevel", 10))));
+    BotFactory::SetAlliedRaceLevel(_createConfig.alliedRaceLevel);
     _createConfig.poolAccounts = sConfigMgr->GetIntDefault("Playerbots.Pool.Accounts", 2);
     _createConfig.poolCharacters = sConfigMgr->GetIntDefault("Playerbots.Pool.Characters", 20);
     _createConfig.poolLogins = sConfigMgr->GetIntDefault("Playerbots.Pool.LoginAtStartup", 5);
@@ -412,6 +414,7 @@ void PlayerbotMgr::UpdatePool(uint32 diff)
     {
         case PoolStage::Start:
             _poolStage = PoolStage::Accounts;
+            BotFactory::FlagBotAccounts(_createConfig);     // allied races (also for accounts made below)
             TC_LOG_INFO("server.loading", "[mod-playerbots] Bot pool: %u account(s), %u character(s), %u login(s) at startup.",
                 _createConfig.poolAccounts, _createConfig.poolCharacters, _createConfig.poolLogins);
             break;
@@ -479,6 +482,7 @@ void PlayerbotMgr::UpdatePool(uint32 diff)
                 BotFactory::CreateRequest request;
                 request.cls = classes[_poolTotal % std::size(classes)];
                 request.team = (_poolTotal / std::size(classes)) % 2 ? HORDE : ALLIANCE;
+                request.pool = true;
                 std::string error;
                 if (BotFactory::CreateCharacter(request, _createConfig, error, accountId, _poolNames[accountId]).empty())
                 {

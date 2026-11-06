@@ -35,6 +35,7 @@ namespace BotFactory
         ObjectGuid creator;
         uint32 creatorAccount = 0;      // for his party invite to the bot
         bool teleport = true;           // to location once set up (not for a dungeon finder fill)
+        bool pool = false;              // a startup pool character: any race, its own starting level
     };
 
     // a bot character in the characters database
@@ -56,7 +57,19 @@ namespace BotFactory
         uint32 poolAccounts = 2;        // bot accounts made at startup
         uint32 poolCharacters = 20;     // bot characters made at startup (all bot accounts together)
         uint32 poolLogins = 5;          // of them logged in at startup, standing on GM Island
+        uint8 alliedRaceLevel = 10;     // owner's rule: allied races start (and are reset) at this level
     };
+
+    // Allied races (Void Elf, Lightforged Draenei, Nightborne, Highmountain Tauren). Owner's rules (2026-11-06):
+    // bot accounts may create them, they start at Playerbots.Create.AlliedRaceLevel (10), and a bot is made one
+    // only for a creator of at least that level (any pool character may be one).
+    bool IsAlliedRace(uint8 race);
+    void SetAlliedRaceLevel(uint8 level);
+    // the level a bot starts and is reset at: 1, the allied race level, death knight 55, demon hunter 98
+    uint8 StartLevelFor(uint8 race, uint8 cls);
+    // Bot accounts get the Legion expansion, which is what this core checks to allow allied races
+    // (CharacterHandler: IsAlliedRacesCreationAllowed = expansion >= Legion; the achievement check is commented out)
+    void FlagBotAccounts(CreateConfig const& config);
 
     // World thread, synchronous queries. Ids of the bot accounts (<prefix>...).
     std::vector<uint32> BotAccountIds(CreateConfig const& config);

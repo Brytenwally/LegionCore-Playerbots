@@ -78,6 +78,16 @@ Playerbots.Create.AccountPassword = "playerbot"
 Playerbots.Create.CharactersPerAccount = 10
 
 #
+#    Playerbots.Create.AlliedRaceLevel
+#        Bots may be allied races (Void Elf, Lightforged Draenei, Nightborne, Highmountain Tauren):
+#        they are created and reset at this level, and ".playerbots create" picks one only for a
+#        creator of at least this level. Bot accounts are given the Legion expansion at startup,
+#        which is what the core checks to allow allied races.
+#        Default: 10
+
+Playerbots.Create.AlliedRaceLevel = 10
+
+#
 #    Playerbots.AutoGear.MinQuality
 #    Playerbots.AutoGear.MaxQuality
 #        Item qualities a created bot and the "autogear" order may pick:

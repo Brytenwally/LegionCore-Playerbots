@@ -86,7 +86,8 @@ When you log out, the bots of your account (your alts) log out with you.
   your level, with a random (or the given) spec, talents and gear, brings it to you and into
   your party. It first uses a free bot of that class from the database (the startup pool,
   `Playerbots.Pool.*`: bot accounts and characters made at startup, some logged in on GM Island),
-  and only creates a new character when there is none. Orders `talents` (show; `talents
+  and only creates a new character when there is none. Bots can be allied races (Void Elf, Lightforged
+  Draenei, Nightborne, Highmountain Tauren) from level 10 (`Playerbots.Create.AlliedRaceLevel`). Orders `talents` (show; `talents
   <spec>` switches) and `autogear` (upgrades for the spec by stat weights, each a random one of
   the 5 best for its slot, within `Playerbots.AutoGear.*` limits; empty bag slots get large bags
   first, replaced pieces go to the bags).

@@ -49,12 +49,16 @@ namespace BotFactory
             return text;
         }
 
-        // playable races of a faction (allied races excluded: they need unlocking); pandaren by faction
+        uint8 alliedRaceLevel = 10;
+
+        // playable races of a faction, allied races included (owner, 2026-11-06); pandaren by faction
         std::vector<uint8> RacesOf(uint32 team)
         {
             if (team == ALLIANCE)
-                return { RACE_HUMAN, RACE_DWARF, RACE_NIGHTELF, RACE_GNOME, RACE_DRAENEI, RACE_WORGEN, RACE_PANDAREN_ALLIANCE };
-            return { RACE_ORC, RACE_UNDEAD_PLAYER, RACE_TAUREN, RACE_TROLL, RACE_GOBLIN, RACE_BLOODELF, RACE_PANDAREN_HORDE };
+                return { RACE_HUMAN, RACE_DWARF, RACE_NIGHTELF, RACE_GNOME, RACE_DRAENEI, RACE_WORGEN, RACE_PANDAREN_ALLIANCE,
+                    RACE_VOID_ELF, RACE_LIGHTFORGED_DRAENEI };
+            return { RACE_ORC, RACE_UNDEAD_PLAYER, RACE_TAUREN, RACE_TROLL, RACE_GOBLIN, RACE_BLOODELF, RACE_PANDAREN_HORDE,
+                RACE_NIGHTBORNE, RACE_HIGHMOUNTAIN_TAUREN };
         }
 
         // a pronounceable name the realm does not have yet
@@ -344,12 +348,45 @@ namespace BotFactory
         return 0;
     }
 
+    bool IsAlliedRace(uint8 race)
+    {
+        return race == RACE_VOID_ELF || race == RACE_LIGHTFORGED_DRAENEI || race == RACE_NIGHTBORNE || race == RACE_HIGHMOUNTAIN_TAUREN;
+    }
+
+    void SetAlliedRaceLevel(uint8 level)
+    {
+        alliedRaceLevel = std::max<uint8>(1, level);
+    }
+
+    uint8 StartLevelFor(uint8 race, uint8 cls)
+    {
+        if (cls == CLASS_DEATH_KNIGHT)
+            return 55;
+        if (cls == CLASS_DEMON_HUNTER)
+            return 98;
+        return IsAlliedRace(race) ? alliedRaceLevel : 1;
+    }
+
+    void FlagBotAccounts(CreateConfig const& config)
+    {
+        std::string prefix;
+        for (char c : config.accountPrefix)                 // the prefix goes into a LIKE pattern
+            if (std::isalnum(static_cast<unsigned char>(c)))
+                prefix += char(std::toupper(static_cast<unsigned char>(c)));
+        if (prefix.empty())
+            return;
+        LoginDatabase.PExecute("UPDATE account SET expansion = %u WHERE username LIKE '%s%%' AND expansion < %u",
+            uint32(EXPANSION_LEGION), prefix.c_str(), uint32(EXPANSION_LEGION));
+    }
+
     std::string CreateCharacter(CreateRequest const& request, CreateConfig const& config, std::string& error,
         uint32 onAccountId, std::string const& onAccountName)
     {
+        // allied races only from their starting level (pool characters are created at it)
         std::vector<uint8> races;
         for (uint8 race : RacesOf(request.team))
-            if (sObjectMgr->GetPlayerInfo(race, request.cls))
+            if (sObjectMgr->GetPlayerInfo(race, request.cls) &&
+                (!IsAlliedRace(race) || request.pool || request.level >= alliedRaceLevel))
                 races.push_back(race);
         if (races.empty())
         {
@@ -389,6 +426,10 @@ namespace BotFactory
                 error = "The core refused to create the character.";
                 return std::string();
             }
+
+            // owner's rule: allied races start at Playerbots.Create.AlliedRaceLevel (the stats follow at login)
+            if (IsAlliedRace(newChar.getRace()) && newChar.getLevel() != alliedRaceLevel)
+                newChar.SetLevel(alliedRaceLevel);
 
             newChar.setCinematic(1);                        // no intro
             newChar.SetAtLoginFlag(AT_LOGIN_FIRST);
@@ -650,7 +691,7 @@ namespace BotFactory
         uint32 const destroyed = BotGear::ClearInventory(bot);
 
         // hero classes cannot go below their starting level (owner's rule for .playerbots create)
-        uint8 const startLevel = bot->getClass() == CLASS_DEATH_KNIGHT ? 55 : bot->getClass() == CLASS_DEMON_HUNTER ? 98 : 1;
+        uint8 const startLevel = StartLevelFor(bot->getRace(), bot->getClass());
         if (bot->getLevel() != startLevel)
             bot->GiveLevel(startLevel);
         bot->SetUInt32Value(PLAYER_FIELD_XP, 0);

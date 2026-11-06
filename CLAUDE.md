@@ -474,6 +474,16 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   `RewardSpell` / `RewardDisplaySpell` learned (no XP, items or scripts); then
   `UpdateAreaDependentAuras`. Logged: `starting zone done (N quests marked complete)`, or an error
   if no AreaTable entry has those names.
+- **Allied races** (owner, 2026-11-06): bot accounts may create them and they start at level 10
+  (`Playerbots.Create.AlliedRaceLevel`). This core gates allied race creation only by the account's expansion
+  (`CharacterHandler`: `IsAlliedRacesCreationAllowed = GetAccountExpansion() >= EXPANSION_LEGION`; the
+  achievement check in `HandleCharCreateOpcode` is commented out); `account.expansion` defaults to 6 (Legion)
+  and `AccountMgr::CreateAccount` does not set it, so new bot accounts already qualify; `FlagBotAccounts` (pool
+  start) raises older bot accounts to 6. `RacesOf` now includes Void Elf / Lightforged Draenei (Alliance) and
+  Nightborne / Highmountain Tauren (Horde); `CreateCharacter` takes an allied race only for a pool character
+  (`CreateRequest::pool`) or a creator at or above that level, and sets it to that level (`SetLevel`, stats at
+  login); `ResetBot` resets it there (`StartLevelFor`: 1, allied level, DK 55, DH 98). A race/class pair without
+  a `playercreateinfo` row is never picked (`GetPlayerInfo`).
 - **Random bots and masters** (owner's rules, 2026-11-05). Random bot = a bot of a bot account
   (`PlayerbotMgr::IsBotAccountName`, account name starts with the prefix; `PlayerbotAI::_randomBot`).
   - `.playerbots create` never takes a bot that has a master (`ReuseBot`: `notifyGuid` empty only).
