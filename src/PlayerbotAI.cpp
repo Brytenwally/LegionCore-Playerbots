@@ -160,6 +160,12 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     {
         _lfgTimer = 0;
         UpdateLfg(bot);
+        _leadTimer += LfgCheckInterval;
+        if (_leadTimer >= 3000)
+        {
+            _leadTimer = 0;
+            PassLfgLead(bot);
+        }
     }
 
     _lootTimer += diff;
@@ -2076,6 +2082,34 @@ void PlayerbotAI::UpdateLfg(Player* bot)
         }
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' accepts dungeon finder proposal %u.", bot->GetName(), proposal);
     sLFGMgr->UpdateProposal(response, guid);
+}
+
+void PlayerbotAI::PassLfgLead(Player* bot)
+{
+    Group* group = bot->GetGroup();
+    if (!group || !group->isLFGGroup() || !group->IsLeader(bot->GetGUID()))
+        return;
+
+    // the owner first, else any player of the group who is online and not a bot
+    ObjectGuid target;
+    for (Group::MemberSlot const& slot : group->GetMemberSlots())
+    {
+        if (slot.Guid == bot->GetGUID() || sPlayerbotMgr->IsBot(slot.Guid) || !ObjectAccessor::FindPlayer(slot.Guid))
+            continue;
+        if (target.IsEmpty() || slot.Guid == _master)
+            target = slot.Guid;
+    }
+    if (target.IsEmpty())
+        return;
+
+    // as /promote: CMSG_SET_PARTY_LEADER (SetPartyLeader::Read: int8 PartyIndex, guid), so the core's handler and its
+    // OnChangeLeader hook (the dungeon finder's leader) run; a dungeon finder group is the instance party (index 1)
+    WorldPacket* packet = new WorldPacket(CMSG_SET_PARTY_LEADER, 1 + 18);
+    *packet << int8(1);
+    *packet << target;
+    bot->GetSession()->QueuePacket(packet);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' gives the lead of its dungeon finder group to %s.", bot->GetName(),
+        target.ToString().c_str());
 }
 
 void PlayerbotAI::JoinLfgFor(Player* bot, BotFactory::CreateRequest const& request, lfg::LfgDungeonSet dungeons, uint8 role)

@@ -132,6 +132,10 @@ private:
     void UpdateFollow(Player* bot);
     // dungeon finder: answers its group's role check by its spec and accepts proposals, as a client would
     void UpdateLfg(Player* bot);
+    // a bot leading a dungeon finder group gives the lead to a real player of it (owner, build #28: the core offers
+    // "find another player" to the leader only, and a bot leader's offer reached nobody)
+    void PassLfgLead(Player* bot);
+    uint32 _leadTimer = 0;
     // group loot: need on a Playerbots.Loot.NeedUpgradePct upgrade for its spec, greed otherwise (random bots
     // pass when Playerbots.Loot.RandomBotsRoll = 0)
     void UpdateLootRolls(Player* bot);

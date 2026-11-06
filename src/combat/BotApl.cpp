@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -43,7 +44,8 @@ namespace
         HealthPct, Health, HealthMax, HealthDeficit,
         Gcd, GcdRemains, Time, CastTime, ExecuteTime,
         PrevGcd, Variable, Stealthed, PetActive, Race, IncomingDamage, Level, SpellHaste,
-        BurnPhase, BurnPhaseDuration
+        BurnPhase, BurnPhaseDuration,
+        CdMaxCharges, DebuffCount, RtbBuffs, PetBuffUp, PetBuffRemains, FirestarterActive
     };
 
     struct Term
@@ -126,12 +128,59 @@ namespace
     };
 
     // SimC action names whose spell has another name
-    std::map<std::string, std::string> const ActionAliases =
+    // SimC names for spells of another name (or several): the alias gets the ids of all of them in the spell index,
+    // so actions, buffs, dots and cooldowns all find them (owner's build #28 log: Feral's thrash_cat / swipe_cat
+    // and Guardian's thrash_bear read nothing, Affliction's unstable_affliction_1..5 neither)
+    std::map<std::string, std::vector<std::string>> const Aliases =
     {
-        { "moonfirecat", "moonfire" }, { "thrashcat", "thrash" }, { "thrashbear", "thrash" },
-        { "swipecat", "swipe" }, { "swipebear", "swipe" }, { "incarnation", "incarnationkingofthejungle" },
-        { "berserk", "berserk" }, { "servicepet", "grimoirefelguard" }
+        { "moonfirecat", { "moonfire" } }, { "thrashcat", { "thrash" } }, { "thrashbear", { "thrash" } },
+        { "swipecat", { "swipe" } }, { "swipebear", { "swipe" } },
+        { "incarnation", { "incarnationkingofthejungle", "incarnationchosenofelune", "incarnationguardianofursoc", "incarnationtreeoflife" } },
+        { "servicepet", { "grimoirefelguard", "grimoireimp", "grimoirefelhunter", "grimoirevoidwalker", "grimoiresuccubus" } },
+        { "bladestormmh", { "bladestorm" } }, { "battlecrydeadlycalm", { "battlecry" } },
+        { "unstableaffliction1", { "unstableaffliction" } }, { "unstableaffliction2", { "unstableaffliction" } },
+        { "unstableaffliction3", { "unstableaffliction" } }, { "unstableaffliction4", { "unstableaffliction" } },
+        { "unstableaffliction5", { "unstableaffliction" } }, { "deadlypoisondot", { "deadlypoison" } },
+        { "bladedance1", { "bladedance" } }, { "eyebeamtick", { "eyebeam" } }, { "brews", { "ironskinbrew" } },
+        { "greatergiftoftheox", { "giftoftheox" } }, { "bokproc", { "blackoutkick" } }
     };
+
+    // names of set bonuses, legendaries and sim-only buffs: always absent, and not reported
+    bool QuietName(std::string const& name)
+    {
+        static char const* const prefixes[] = { "t19", "t20", "t21", "sephuz", "sindorei", "kaelthas", "insanitydrain", "havoct2",
+            "trinket", "activehavoc", "mooncd" };
+        for (char const* prefix : prefixes)
+            if (name.rfind(prefix, 0) == 0)
+                return true;
+        return false;
+    }
+
+    // sim-only terms that stay 0 without being reported (no game state behind them, or nothing a bot can do with it)
+    bool QuietTerm(std::string const& id)
+    {
+        static char const* const exact[] = { "mantle_duration", "exsanguinated", "finality", "poisoned_bleeds", "fok_rotation",
+            "ssw_refund_offset", "raw_haste_pct", "nonexecute_actors_pct", "current_insanity_drain", "cast_regen",
+            "feral_spirit.remains", "target.is_add", "sim.target", "target", "new_tick_time", "darkglare_no_de", "doomguard_no_de",
+            "dreadstalker_count", "dreadstalker_no_de", "dreadstalker_remaining_duration", "infernal_no_de", "pet_count",
+            "service_no_de", "wild_imp_count", "wild_imp_no_de", "wild_imp_remaining_duration", "dot.virulent_plague.tick_time_remains" };
+        for (char const* name : exact)
+            if (id == name)
+                return true;
+        static char const* const prefixes[] = { "movement.", "stat.", "consumable.", "lowest_vuln_within", "time_to_sht" };
+        for (char const* prefix : prefixes)
+            if (id.rfind(prefix, 0) == 0)
+                return true;
+        static char const* const suffixes[] = { ".improved", ".extended_by_demonic", ".cost", ".travel_time", ".cast_regen", ".vuln_casts",
+            ".marks_next_gcd", ".new_tick_time", ".value", ".duration_guess" };
+        for (char const* suffix : suffixes)
+        {
+            size_t const n = std::strlen(suffix);
+            if (id.size() > n && id.compare(id.size() - n, n, suffix) == 0)
+                return true;
+        }
+        return false;
+    }
 
     std::map<std::string, Powers> const PowerNames =
     {
@@ -185,8 +234,106 @@ namespace
         Term t;
         std::vector<std::string> p = Split(id, '.');
         auto field = [&](size_t i) -> std::string { return i < p.size() ? p[i] : std::string(); };
-        auto unknown = [&]() { profile.unknownTerms.insert(id); t.kind = T::Const; t.value = 0.0; };
-        auto spell = [&](std::string const& n) { std::string s = Normalize(n); profile.spellNames.insert(s); return s; };
+        auto unknown = [&]()
+        {
+            if (!QuietTerm(id))
+                profile.unknownTerms.insert(id);
+            t.kind = T::Const;
+            t.value = 0.0;
+        };
+        auto spell = [&](std::string const& n)
+        {
+            std::string s = Normalize(n);
+            if (!QuietName(s))
+                profile.spellNames.insert(s);
+            return s;
+        };
+        if (QuietTerm(id))
+        {
+            t.kind = T::Const;
+            return t;
+        }
+        // attack_haste: the melee haste multiplier
+        if (id == "attack_haste")
+        {
+            t.kind = T::SpellHaste;
+            return t;
+        }
+        // the target's health while above 90% (Fire's Firestarter)
+        if (id == "firestarter.active")
+        {
+            t.kind = T::FirestarterActive;
+            return t;
+        }
+        // Outlaw: how many Roll the Bones buffs are up
+        if (id == "rtb_buffs")
+        {
+            t.kind = T::RtbBuffs;
+            return t;
+        }
+        // Affliction: how many Unstable Afflictions of the bot are on the target
+        if (id == "buff.active_uas.stack" || id == "active_uas")
+        {
+            t.kind = T::DebuffCount;
+            t.name = spell("unstable_affliction");
+            return t;
+        }
+        // Brewmaster: stagger level auras on the bot
+        if (id == "stagger.heavy" || id == "stagger.moderate" || id == "stagger.light")
+        {
+            t.kind = T::BuffUp;
+            t.name = spell(id.substr(8) + "_stagger");
+            return t;
+        }
+        // Unholy: Death and Decay / Defile under the bot (their buff)
+        if (id == "death_and_decay.ticking" || id == "defile.ticking")
+        {
+            t.kind = T::BuffUp;
+            t.name = spell(id.substr(0, id.find('.')));
+            return t;
+        }
+        if (id == "time_to_die")
+        {
+            t.kind = T::TargetTimeToDie;
+            return t;
+        }
+        if (id == "max_charges")
+        {
+            t.kind = T::CdMaxCharges;
+            return t;
+        }
+        if (id == "cooldown_react")
+        {
+            t.kind = T::CdReady;
+            return t;
+        }
+        if (id == "pmultiplier" || id == "persistent_multiplier")
+        {
+            t.kind = T::Const;
+            t.value = 1.0;
+            return t;
+        }
+        // pet.<name>.buff.<aura>.up / down / remains: the bot's pet's aura
+        if (p.size() >= 5 && p[0] == "pet" && p[2] == "buff")
+        {
+            t.name = spell(p[3]);
+            if (p[4] == "remains")
+                t.kind = T::PetBuffRemains;
+            else
+            {
+                t.kind = T::PetBuffUp;
+                t.negate = p[4] == "down";
+            }
+            return t;
+        }
+        // prev_off_gcd.X (no count)
+        if (p.size() == 2 && p[0] == "prev_off_gcd")
+        {
+            t.kind = T::PrevGcd;
+            t.n = 1;
+            t.name = spell(p[1]);
+            return t;
+        }
 
         std::string const& head = p[0];
 
@@ -269,6 +416,7 @@ namespace
             else if (f == "refreshable")                        t.kind = T::DebuffRefreshable;
             else if (f == "tick_time")                          t.kind = T::DebuffTickTime;
             else if (f == "pmultiplier" || f == "persistent_multiplier") { t.kind = T::Const; t.value = 1.0; }
+            else if (f == "max_stacks" || f == "max_stack")     t.kind = T::BuffMaxStack;
             else
                 unknown();
             return t;
@@ -292,6 +440,10 @@ namespace
             else if (f == "recharge_time")                      t.kind = T::CdRechargeTime;
             else if (f == "duration")                           t.kind = T::CdDuration;
             else if (f == "full_recharge_time")                 t.kind = T::CdFullRecharge;
+            else if (f == "max_charges")                        t.kind = T::CdMaxCharges;
+            else if (f == "usable")                             t.kind = T::CdReady;
+            else if (f == "usable_in" || f == "adjusted_remains") t.kind = T::CdRemains;
+            else if (f == "cooldown")                           t.kind = T::CdDuration;
             else if (f == "cast_time")                          t.kind = T::CastTime;
             else if (f == "execute_time")                       t.kind = T::ExecuteTime;
             else if (f == "in_flight" || f == "in_flight_to_target") { t.kind = T::Const; t.value = 0.0; }
@@ -631,9 +783,8 @@ namespace
             action.list = list;
             std::string const name = opts[0];
             std::string normalized = Normalize(name);
-            auto alias = ActionAliases.find(normalized);
-            if (alias != ActionAliases.end())
-                normalized = alias->second;
+            if (QuietName(normalized))
+                normalized = "useitem";                     // a legendary / trinket action: skipped
 
             std::map<std::string, std::string> o;
             for (size_t i = 1; i < opts.size(); ++i)
@@ -743,6 +894,9 @@ namespace
         std::set<std::string> wanted;
         for (auto const& pair : profiles)
             wanted.insert(pair.second.spellNames.begin(), pair.second.spellNames.end());
+        for (auto const& alias : Aliases)
+            if (wanted.count(alias.first))
+                wanted.insert(alias.second.begin(), alias.second.end());
         for (std::string const& name : wanted)
             spellIndex[name];
 
@@ -756,8 +910,23 @@ namespace
             if (itr != spellIndex.end())
                 itr->second.push_back(id);
         }
+        for (auto const& alias : Aliases)
+        {
+            auto itr = spellIndex.find(alias.first);
+            if (itr == spellIndex.end())
+                continue;
+            for (std::string const& target : alias.second)
+            {
+                auto source = spellIndex.find(target);
+                if (source != spellIndex.end())
+                    itr->second.insert(itr->second.end(), source->second.begin(), source->second.end());
+            }
+        }
         for (auto& pair : spellIndex)
+        {
             std::sort(pair.second.rbegin(), pair.second.rend());
+            pair.second.erase(std::unique(pair.second.begin(), pair.second.end()), pair.second.end());
+        }
     }
 
     std::vector<uint32> const& SpellIds(std::string const& name)
@@ -1127,6 +1296,44 @@ namespace
                 float const haste = bot->GetFloatValue(UNIT_FIELD_MOD_SPELL_HASTE);
                 return haste > 0.0f ? haste : 1.0;
             }
+            case T::CdMaxCharges:
+            {
+                uint32 const id = AnySpellId(ctx, OwnSpell(ctx, t));
+                SpellInfo const* info = id ? sSpellMgr->GetSpellInfo(id) : nullptr;
+                SpellCategoryEntry const* charges = info ? sSpellCategoryStore.LookupEntry(info->Categories.ChargeCategory) : nullptr;
+                return charges ? double(charges->MaxCharges) : 1.0;
+            }
+            case T::DebuffCount:
+            {
+                if (!target)
+                    return 0.0;
+                double count = 0.0;
+                for (uint32 id : SpellIds(t.name))
+                    if (Aura* aura = target->GetAura(id, bot->GetGUID()))
+                        if (!aura->GetSpellInfo()->IsPassive())
+                            count += 1.0;
+                return count;
+            }
+            case T::RtbBuffs:
+            {
+                static char const* const buffs[] = { "broadside", "buriedtreasure", "grandmelee", "jollyroger", "sharkinfestedwaters", "truebearing" };
+                double count = 0.0;
+                for (char const* buff : buffs)
+                    if (FindAura(bot, buff, ObjectGuid::Empty))
+                        count += 1.0;
+                return count;
+            }
+            case T::PetBuffUp:
+            {
+                bool const up = bot->GetPet() && FindAura(bot->GetPet(), t.name, ObjectGuid::Empty);
+                return (up != t.negate) ? 1.0 : 0.0;
+            }
+            case T::PetBuffRemains:
+            {
+                Aura* aura = bot->GetPet() ? FindAura(bot->GetPet(), t.name, ObjectGuid::Empty) : nullptr;
+                return aura ? Seconds(aura->GetDuration()) : 0.0;
+            }
+            case T::FirestarterActive: return target && target->GetHealthPct() > 90.0f ? 1.0 : 0.0;
             case T::BurnPhase: return state.burnPhase ? 1.0 : 0.0;
             case T::BurnPhaseDuration: return state.burnPhase ? getMSTimeDiff(state.burnStart, ctx.now) / 1000.0 : 0.0;
         }

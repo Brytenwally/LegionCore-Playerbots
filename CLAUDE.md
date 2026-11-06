@@ -582,6 +582,14 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     player of the same group only refreshes the fill). The replacement queue does not set the selection again:
     an empty selection means the queue's own id. A released bot rests 5 min (`Bot::restUntil`, `ReleaseBot`)
     before it may fill a queue, so the kicked bot is not sent back into the same group.
+  - **A member leaving gave no replacement queue** (owner, build #28: "a bot leaving the RDF party doesn't trigger
+    the queue"). Core cause: `LFGGroupScript::OnRemoveMember` offers "find another player" (`SendLfgOfferContinue`)
+    only to the dungeon finder leader, often a bot (nobody reads the offer), and skips it when the leader is the one
+    leaving (the hook runs before the group picks a new leader); `/promote` was refused in any group with a member in
+    an instance. Fixed in the core (commit "Fix dungeon finder replacement offer and lead change": offer to the next
+    leader, lead change allowed in dungeon finder groups) and here: `PlayerbotAI::PassLfgLead` (every 3 s) makes a bot
+    leading a dungeon finder group give the lead to an online player of it (its master first) by a queued
+    `CMSG_SET_PARTY_LEADER` (int8 PartyIndex 1 = instance party, packed guid), so the offer reaches a person.
   - Not yet: raids / scenarios / LFR, boot votes, bots with no group after a dungeon whose queuer was not in
     it (matched with others; they keep that master), refilling a running dungeon.
 - Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
@@ -661,6 +669,14 @@ Vengeance) keep the module's own lists, to be done by hand later.
 - Talents: `FillTalents` takes the profile's `talents=` digit for a row (column 1-3; 0 = the old name table);
   startup logs each profile's talents by name (`SimC talents of X (spec N): 1302002: ...`).
 - Config: `Playerbots.Rotation.SimC` (1), `Playerbots.Rotation.Directory` ("playerbots_apl").
+- Fixes from the owner's build #28 startup log (unknown names / terms per spec): `Aliases` (SimC name -> spell
+  names) are now merged into the spell index, so they work in terms too, not only in actions (Feral `thrash_cat` /
+  `swipe_cat`, Guardian `thrash_bear`, Affliction `unstable_affliction_1..5`, `incarnation`, `service_pet`,
+  `bladestorm_mh`, `deadly_poison_dot`, Brewmaster `brews` ...). New terms: `attack_haste`, `firestarter.active`,
+  `rtb_buffs`, `buff.active_uas.stack`, `stagger.heavy|moderate|light`, `death_and_decay|defile.ticking`, bare
+  `time_to_die` / `max_charges` / `cooldown_react`, `pet.X.buff.Y.*`, `prev_off_gcd.X`, `dot.X.max_stacks`, cooldown
+  `max_charges|usable|usable_in|adjusted_remains|cooldown`. Set bonus / legendary / trinket names (`QuietName`) and
+  sim-only terms (`QuietTerm`: movement, stat.*, Demonology's imp counts...) stay 0 and are no longer reported.
 
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
@@ -747,6 +763,11 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   Prot Paladin's Crusader's Judgment row 1 -> 2, Frost's Ice Floes row 5 -> 2...): a moved talent is kept in
   its new row, else the row's passive one, never Blessed Hammer (replaces the Hammer of the Righteous the
   Prot rotation casts). Loot, aggressive pulls, dismissals and reuse logged as expected.
+
+- 2026-11-06, owner's test of build #28 (allied races / account wipe / SimC rotations): **everything works except**
+  a bot leaving a dungeon finder group did not queue the group for a replacement (core bug, fixed, see "Dungeon
+  finder"). His log: 28 SimC profiles loaded, `Talent builds: 31 specs, 0 name(s) not found`; the unknown APL names
+  and terms it listed were fixed in the commit after.
 
 ## Checking
 
