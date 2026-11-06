@@ -590,7 +590,11 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     leader, lead change allowed in dungeon finder groups) and here: `PlayerbotAI::PassLfgLead` (every 3 s) makes a bot
     leading a dungeon finder group give the lead to an online player of it (its master first) by a queued
     `CMSG_SET_PARTY_LEADER` (int8 PartyIndex 1 = instance party, packed guid), so the offer reaches a person.
-  - Not yet: raids / scenarios / LFR, boot votes, bots with no group after a dungeon whose queuer was not in
+  - **Vote kicks** (owner, 2026-11-06): when a player's vote to kick a **bot** is running (victim is a bot, a
+    non-bot member has voted yes: the kicker votes yes on his own), every other bot of the group votes yes
+    (`UpdateLfg`, core accessor `LFGMgr::GetPendingBoot`, vote by `UpdateBoot`; log `votes yes to kick`). Kicks of
+    players are left to the players: bots do not vote on them.
+  - Not yet: raids / scenarios / LFR, bots with no group after a dungeon whose queuer was not in
     it (matched with others; they keep that master), refilling a running dungeon.
 - Compiled in the container (core `LFGMgr.cpp`, module files) on 2026-11-05; runtime untested.
 

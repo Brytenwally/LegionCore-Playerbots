@@ -2057,6 +2057,24 @@ void PlayerbotAI::UpdateLfg(Player* bot)
             TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' answers the dungeon finder role check: %s.", bot->GetName(), LfgRoleName(role));
             sLFGMgr->UpdateRoleCheck(group->GetGUID(), guid, role);
         }
+
+        // owner's rule (2026-11-06): a player's vote to kick a bot gets every other bot's yes; other kicks are left to
+        // the players (the bot does not vote, as before)
+        ObjectGuid victim;
+        std::vector<ObjectGuid> agreed;
+        if (sLFGMgr->GetPendingBoot(group->GetGUID(), guid, victim, agreed) && victim != guid && sPlayerbotMgr->IsBot(victim))
+        {
+            bool playerAgrees = false;
+            for (ObjectGuid const& voter : agreed)
+                if (!sPlayerbotMgr->IsBot(voter))
+                    playerAgrees = true;
+            if (playerAgrees)
+            {
+                TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' votes yes to kick %s from its dungeon finder group.",
+                    bot->GetName(), victim.ToString().c_str());
+                sLFGMgr->UpdateBoot(group->GetGUID(), guid, true);
+            }
+        }
     }
 
     uint32 const proposal = sLFGMgr->GetPendingProposal(guid);
