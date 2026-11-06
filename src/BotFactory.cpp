@@ -11,6 +11,7 @@
 #include "CharacterPackets.h"
 #include "DB2Stores.h"
 #include "DatabaseEnv.h"
+#include "LFGMgr.h"
 #include "Log.h"
 #include "MotionMaster.h"
 #include "ObjectMgr.h"
@@ -687,6 +688,8 @@ namespace BotFactory
         bot->CombatStop();
         bot->GetMotionMaster()->Clear();
         bot->GetMotionMaster()->MoveIdle();
+        // the random dungeon cooldown (30 min) of its last dungeon finder group would refuse its next fill
+        bot->RemoveAurasDueToSpell(lfg::LFG_SPELL_DUNGEON_COOLDOWN);
 
         uint32 const destroyed = BotGear::ClearInventory(bot);
 

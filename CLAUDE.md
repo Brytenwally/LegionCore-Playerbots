@@ -590,6 +590,10 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     leader, lead change allowed in dungeon finder groups) and here: `PlayerbotAI::PassLfgLead` (every 3 s) makes a bot
     leading a dungeon finder group give the lead to an online player of it (its master first) by a queued
     `CMSG_SET_PARTY_LEADER` (int8 PartyIndex 1 = instance party, packed guid), so the offer reaches a person.
+  - **The group still could not requeue on build #30**: the core refused the random dungeon cooldown (71328, given to
+    every member on entering) even for a replacement request; fixed in the core (commit "Let dungeon finder groups
+    requeue for a replacement", see its `CLAUDE.md`). `BotFactory::ResetBot` now removes that cooldown too, or a
+    dismissed bot's next fill (within 30 min) would be refused as `LFG_JOIN_RANDOM_COOLDOWN`.
   - **Vote kicks** (owner, 2026-11-06): when a player's vote to kick a **bot** is running (victim is a bot, a
     non-bot member has voted yes: the kicker votes yes on his own), every other bot of the group votes yes
     (`UpdateLfg`, core accessor `LFGMgr::GetPendingBoot`, vote by `UpdateBoot`; log `votes yes to kick`). Kicks of
@@ -774,6 +778,10 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   and terms it listed were fixed in the commit after.
 - 2026-11-06, owner's test of build #29 (allied races from level 10, `Playerbots.DeleteBotAccounts`): **works
   perfectly**.
+- 2026-11-06, owner's test of build #30: **works**: the lead passes to the player (`gives the lead of its dungeon
+  finder group`), bots vote yes to kick a bot, the kicked random bot is dismissed; fill, combat, SimC rotations and
+  looting as before. **Problem**: the group still could not queue for a replacement, neither by the offer nor by
+  hand (core: random dungeon cooldown, fixed in the commit after).
 
 ## Checking
 
