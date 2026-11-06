@@ -40,6 +40,7 @@ void PlayerbotMgr::LoadConfig()
     _engageDelay = sConfigMgr->GetIntDefault("Playerbots.Combat.EngageDelay", 1200);
     _selfGMOnly = sConfigMgr->GetBoolDefault("Playerbots.Self.GMOnly", true);
     _useApl = sConfigMgr->GetBoolDefault("Playerbots.Rotation.SimC", true);
+    _deleteBotAccounts = sConfigMgr->GetBoolDefault("Playerbots.DeleteBotAccounts", false);
     _aplDirectory = sConfigMgr->GetStringDefault("Playerbots.Rotation.Directory", "playerbots_apl");
     _loot.randomBotsRoll = sConfigMgr->GetBoolDefault("Playerbots.Loot.RandomBotsRoll", true);
     _defaultCo = sConfigMgr->GetStringDefault("Playerbots.Strategies.Combat", "tank,defensives,potions");
@@ -667,6 +668,48 @@ void PlayerbotMgr::Update(uint32 diff)
 
         ++itr;
     }
+}
+
+void PlayerbotMgr::DeleteBotAccountsAtStartup()
+{
+    if (!_enabled || !_deleteBotAccounts)
+        return;
+
+    // SkyFire's guards: never let a short or generic prefix match real accounts
+    std::string prefix;
+    for (char c : _createConfig.accountPrefix)
+        if (std::isalnum(static_cast<unsigned char>(c)))
+            prefix += char(std::toupper(static_cast<unsigned char>(c)));
+    if (prefix.size() < 3 || prefix == "ADMIN" || prefix == "GM" || prefix == "PLAYER" || prefix == "ACCOUNT" || prefix == "TEST")
+    {
+        TC_LOG_ERROR("server.loading", "[mod-playerbots] Playerbots.DeleteBotAccounts: account prefix '%s' is too short or looks unsafe; "
+            "nothing deleted.", _createConfig.accountPrefix.c_str());
+        return;
+    }
+
+    uint32 accounts = 0;
+    uint32 characters = 0;
+    for (uint32 accountId : BotFactory::BotAccountIds(_createConfig))
+    {
+        // the characters first, for good (DeleteAccount follows CharDelete.Method, which may only mark them deleted)
+        if (QueryResult result = CharacterDatabase.PQuery("SELECT guid FROM characters WHERE account = %u", accountId))
+        {
+            do
+            {
+                Player::DeleteFromDB(ObjectGuid::Create<HighGuid::Player>((*result)[0].GetUInt64()), accountId, false, true);
+                ++characters;
+            } while (result->NextRow());
+        }
+        if (AccountMgr::DeleteAccount(accountId) == AccountOpResult::AOR_OK)
+            ++accounts;
+        else
+            TC_LOG_ERROR("server.loading", "[mod-playerbots] Playerbots.DeleteBotAccounts: could not delete account %u.", accountId);
+    }
+
+    // the deletes are queued: building the pool now could meet the old accounts' rows
+    _poolStage = PoolStage::Done;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Playerbots.DeleteBotAccounts: deleted %u bot account(s) ('%s...') and %u character(s). "
+        "No bot pool this boot: set Playerbots.DeleteBotAccounts = 0 and restart to build a new one.", accounts, prefix.c_str(), characters);
 }
 
 bool PlayerbotMgr::IsBot(ObjectGuid const& guid) const

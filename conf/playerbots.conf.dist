@@ -78,6 +78,17 @@ Playerbots.Create.AccountPassword = "playerbot"
 Playerbots.Create.CharactersPerAccount = 10
 
 #
+#    Playerbots.DeleteBotAccounts
+#        1: at the next startup, every account whose name starts with Playerbots.Create.AccountPrefix
+#        is deleted together with all its characters (for good, whatever CharDelete.Method says), and
+#        no bot pool is built that time. Then set it back to 0 and restart: the pool is built anew.
+#        Refused for a prefix shorter than 3 characters or one such as ADMIN / GM / PLAYER.
+#        Default: 0 - (Off)
+#                 1 - (Delete at the next startup)
+
+Playerbots.DeleteBotAccounts = 0
+
+#
 #    Playerbots.Create.AlliedRaceLevel
 #        Bots may be allied races (Void Elf, Lightforged Draenei, Nightborne, Highmountain Tauren):
 #        they are created and reset at this level, and ".playerbots create" picks one only for a

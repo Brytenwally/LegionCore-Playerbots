@@ -34,6 +34,7 @@ public:
     {
         BotRotations::Initialize();
         BotApl::Initialize(sPlayerbotMgr->GetAplDirectory());
+        sPlayerbotMgr->DeleteBotAccountsAtStartup();
         BotFactory::CheckTalentBuilds();
         // the core's single-player dungeon finder makes a lone player's group at once: no time for the fill
         if (sPlayerbotMgr->IsEnabled() && sWorld->getBoolConfig(CONFIG_LFG_DEBUG_JOIN))

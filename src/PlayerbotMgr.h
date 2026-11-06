@@ -128,6 +128,10 @@ public:
     // the bots this player owns (PlayerbotAI::IsMaster), from any thread
     std::vector<std::pair<ObjectGuid, std::shared_ptr<PlayerbotAI>>> GetBotsOwnedBy(ObjectGuid const& player, uint32 accountId) const;
 
+    // Startup (SkyFire's / AzerothCore's DeleteRandomBotAccounts): with Playerbots.DeleteBotAccounts = 1,
+    // every account named <AccountPrefix>... and its characters are deleted, and no pool is built this boot.
+    void DeleteBotAccountsAtStartup();
+
     // World thread, every world update.
     void Update(uint32 diff);
     // Any thread: a client's character logged out.
@@ -242,6 +246,7 @@ private:
     std::atomic<uint32> _selfCount{ 0 };                    // skips the lookup for every client update while 0
     bool _selfGMOnly = true;
     bool _useApl = true;
+    bool _deleteBotAccounts = false;
     std::string _aplDirectory = "playerbots_apl";
     BotFormation::Shape _defaultFormation = BotFormation::Shape::Role;
     BotGear::Options _gearOptions;

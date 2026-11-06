@@ -474,6 +474,15 @@ creator's level, with a random spec (or the given one) and gear for it; the owne
   `RewardSpell` / `RewardDisplaySpell` learned (no XP, items or scripts); then
   `UpdateAreaDependentAuras`. Logged: `starting zone done (N quests marked complete)`, or an error
   if no AreaTable entry has those names.
+- **Deleting the bot accounts at startup** (owner, 2026-11-06; SkyFire's `Playerbots.DeleteRandomBotAccounts` =
+  AzerothCore's `AiPlayerbot.DeleteRandomBotAccounts`): `Playerbots.DeleteBotAccounts = 1` ->
+  `PlayerbotMgr::DeleteBotAccountsAtStartup` (`OnStartup`, before any pool work): SkyFire's prefix guards (at
+  least 3 characters, not ADMIN / GM / PLAYER / ACCOUNT / TEST), then for each `<prefix>%` account its characters
+  by `Player::DeleteFromDB(guid, account, false, deleteFinally = true)` and the account by
+  `AccountMgr::DeleteAccount` (which alone would follow `CharDelete.Method` and might only mark the characters
+  deleted). No pool this boot (`PoolStage::Done`, as both references): the deletes are queued, and recreating
+  accounts by the same names at once could meet the old rows. AzerothCore's version also deletes rows of ~40
+  tables by hand (its own playerbots tables, orphans); here `DeleteFromDB` already removes each character's data.
 - **Allied races** (owner, 2026-11-06): bot accounts may create them and they start at level 10
   (`Playerbots.Create.AlliedRaceLevel`). This core gates allied race creation only by the account's expansion
   (`CharacterHandler`: `IsAlliedRacesCreationAllowed = GetAccountExpansion() >= EXPANSION_LEGION`; the
