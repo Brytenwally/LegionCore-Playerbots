@@ -266,6 +266,27 @@ Playerbots.LFG.Fill = 1
 Playerbots.LFG.FillDelay = 30000
 Playerbots.LFG.JoinInterval = 2000
 
+#
+#    Playerbots.BG.Fill
+#    Playerbots.BG.FillDelay
+#    Playerbots.BG.JoinInterval
+#    Playerbots.BG.BotsPerTeam
+#        A player who queues for a battleground (a specific one or the random battleground; alone or
+#        with his group): FillDelay ms later, idle pool bots of both factions (logged in on GM Island,
+#        at most his level) join the same queue one every JoinInterval ms, each set up to his level in
+#        a random spec of its class (about one healer in five), until each team has BotsPerTeam
+#        players (0 = the battleground's minimum, never more than its maximum); the players and party
+#        bots already queued count. If nobody waits in that queue any more, bots still waiting leave it
+#        and go back to GM Island; bots that got in play the battleground and go back once it is over.
+#        Arenas, rated battlegrounds, brawls and Ashran are not filled. Party bots always enter the
+#        battleground their leader queued the group for.
+#        Default: 1, 30000, 1000, 0
+
+Playerbots.BG.Fill = 1
+Playerbots.BG.FillDelay = 30000
+Playerbots.BG.JoinInterval = 1000
+Playerbots.BG.BotsPerTeam = 0
+
 ###################################################################################################
 # LOOT ROLLS AND EQUIPPING FROM THE BAGS
 ###################################################################################################

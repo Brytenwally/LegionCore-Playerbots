@@ -5,6 +5,9 @@
 #include "PlayerbotMgr.h"
 #include "PlayerbotAI.h"
 #include "AccountMgr.h"
+#include "BattlegroundMgr.h"
+#include "BattlegroundQueue.h"
+#include "BotBattleground.h"
 #include "Chat.h"
 #include "Config.h"
 #include "DB2Stores.h"
@@ -65,6 +68,10 @@ void PlayerbotMgr::LoadConfig()
     _lfgFillEnabled = sConfigMgr->GetBoolDefault("Playerbots.LFG.Fill", true);
     _lfgFillDelay = sConfigMgr->GetIntDefault("Playerbots.LFG.FillDelay", 30000);
     _lfgJoinInterval = std::max(500, sConfigMgr->GetIntDefault("Playerbots.LFG.JoinInterval", 2000));
+    _bgFillEnabled = sConfigMgr->GetBoolDefault("Playerbots.BG.Fill", true);
+    _bgFillDelay = sConfigMgr->GetIntDefault("Playerbots.BG.FillDelay", 30000);
+    _bgJoinInterval = std::max(250, sConfigMgr->GetIntDefault("Playerbots.BG.JoinInterval", 1000));
+    _bgBotsPerTeam = uint32(std::max(0, sConfigMgr->GetIntDefault("Playerbots.BG.BotsPerTeam", 0)));
     _survival.defensives = sConfigMgr->GetBoolDefault("Playerbots.Combat.Defensives", true);
     _survival.potionHealthPct = sConfigMgr->GetFloatDefault("Playerbots.Combat.PotionHealthPct", 30.0f);
     _survival.potionManaPct = sConfigMgr->GetFloatDefault("Playerbots.Combat.PotionManaPct", 20.0f);
@@ -818,7 +825,7 @@ void PlayerbotMgr::OnClientUpdate(Player* player, uint32 diff)
             ai->Update(player, diff);
     }
 
-    if (!_enabled || !_lfgFillEnabled)
+    if (!_enabled || (!_lfgFillEnabled && !_bgFillEnabled))
         return;
 
     {
@@ -830,7 +837,10 @@ void PlayerbotMgr::OnClientUpdate(Player* player, uint32 diff)
         timer = 0;
     }
 
-    if (!sLFGMgr->HasQueue(guid))
+    if (_bgFillEnabled)
+        ReportBgQueues(player);
+
+    if (!_lfgFillEnabled || !sLFGMgr->HasQueue(guid))
         return;
 
     // a party's queue is its leader's; a dungeon finder group queueing again for a replacement (a member kicked
@@ -920,16 +930,19 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
     _lfgTimer = 0;
 
     std::vector<QueueReport> reports;
+    std::vector<BgReport> bgReports;
     std::vector<ObjectGuid> releases;
     {
         std::lock_guard<std::mutex> lock(_lfgLock);
         reports.swap(_queueReports);
+        bgReports.swap(_bgReports);
         releases.swap(_releaseRequests);
     }
     for (ObjectGuid const& guid : releases)
         ReleaseBot(guid);
 
     uint32 const now = getMSTime();
+    UpdateBgFill(bgReports, now);
     for (QueueReport const& report : reports)
     {
         auto const fillKey = std::make_pair(report.key, report.queueId);
@@ -1125,6 +1138,248 @@ bool PlayerbotMgr::StartLfgBot(LfgFill& fill, uint8 role)
     TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: bot '%s' fills a %s for %s.", best->name.c_str(),
         role == lfg::PLAYER_ROLE_TANK ? "tank" : role == lfg::PLAYER_ROLE_HEALER ? "healer" : "dps",
         fill.report.queuer.ToString().c_str());
+    return true;
+}
+
+// ---- Battleground fill (2026-11-06) ---------------------------------------------------------------------
+
+// the client's thread, every 2 s: each normal battleground queue he waits in (not invited yet)
+void PlayerbotMgr::ReportBgQueues(Player* player)
+{
+    if (player->InBattleground() || !BotBattleground::IsQueued(player))
+        return;
+
+    std::vector<BgReport> reports;
+    for (uint32 i = 0; i < PLAYER_MAX_BATTLEGROUND_QUEUES; ++i)
+    {
+        uint8 const queue = player->GetBattlegroundQueueTypeId(i);
+        if (!BotBattleground::IsFillableQueue(queue) || player->IsInvitedForBattlegroundQueueType(queue))
+            continue;
+        BgReport report;
+        report.queuer = player->GetGUID();
+        report.queueType = queue;
+        report.bgTypeId = MS::Battlegrounds::GetBgTemplateIdByQueueTypeID(queue);
+        report.level = player->getLevel();
+        report.team = player->GetTeam();
+        // the bots of his group queued with it (a group queues as one: its leader counts them)
+        if (Group* group = player->GetGroup())
+            if (group->GetLeaderGUID() == player->GetGUID())
+                for (Group::MemberSlot const& slot : group->GetMemberSlots())
+                    if (slot.Guid != player->GetGUID() && IsBot(slot.Guid))
+                        ++report.partyBots;
+        if (report.bgTypeId)
+            reports.push_back(report);
+    }
+    if (reports.empty())
+        return;
+    std::lock_guard<std::mutex> lock(_lfgLock);
+    _bgReports.insert(_bgReports.end(), reports.begin(), reports.end());
+}
+
+void PlayerbotMgr::UpdateBgFill(std::vector<BgReport> const& reports, uint32 now)
+{
+    for (BgReport const& report : reports)
+    {
+        Battleground* bg = sBattlegroundMgr->GetBattlegroundTemplate(report.bgTypeId);
+        if (!bg)
+            continue;
+        PVPDifficultyEntry const* bracket = sDB2Manager.GetBattlegroundBracketByLevel(bg->GetMapId(), report.level);
+        if (!bracket)
+            continue;
+        BgFill& fill = _bgFills[std::make_pair(report.queueType, bracket->RangeIndex)];
+        if (!fill.firstSeen)
+        {
+            fill.firstSeen = now;
+            fill.queueType = report.queueType;
+            fill.bgTypeId = report.bgTypeId;
+            fill.level = report.level;
+            fill.master = report.queuer;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: %s queued (battleground %u, levels %u-%u); bots fill both teams in %u s.",
+                report.queuer.ToString().c_str(), uint32(report.bgTypeId), uint32(bracket->MinLevel), uint32(bracket->MaxLevel),
+                _bgFillDelay / 1000);
+        }
+        BgFill::Queuer& queuer = fill.queuers[report.queuer];
+        queuer.team = report.team;
+        queuer.partyBots = report.partyBots;
+        queuer.lastSeen = now;
+    }
+
+    // a bot no longer needed leaves the queue and goes back to GM Island, unless it got in (or was invited)
+    auto abandon = [](ObjectGuid const& guid)
+    {
+        std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(guid);
+        if (!ai)
+            return;
+        ObjectAccessor::PostToPlayer(guid, [ai](Player* bot) -> void
+        {
+            if (ai->AbandonBattleground(bot))
+                ai->Dismiss(bot, "nobody waits in its battleground queue any more");
+        });
+    };
+
+    for (auto itr = _bgFills.begin(); itr != _bgFills.end();)
+    {
+        BgFill& fill = itr->second;
+        for (auto queuer = fill.queuers.begin(); queuer != fill.queuers.end();)
+        {
+            if (getMSTimeDiff(queuer->second.lastSeen, now) > 5000)
+                queuer = fill.queuers.erase(queuer);
+            else
+                ++queuer;
+        }
+
+        // nobody waits any more: the battleground started (or they left the queue)
+        if (fill.queuers.empty())
+        {
+            for (BgFill::FillBot const& bot : fill.bots)
+                abandon(bot.guid);
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: nobody waits in queue %u any more (%u fill bot(s)).",
+                uint32(fill.queueType), uint32(fill.bots.size()));
+            itr = _bgFills.erase(itr);
+            continue;
+        }
+
+        // a bot no longer in the queue (it got in, or the join failed) leaves the fill
+        BattlegroundQueue& queue = sBattlegroundMgr->GetBattlegroundQueue(fill.queueType);
+        for (auto bot = fill.bots.begin(); bot != fill.bots.end();)
+        {
+            GroupQueueInfo info;
+            if (queue.GetPlayerGroupInfoData(bot->guid, &info) || getMSTimeDiff(bot->started, now) < 10000)
+            {
+                ++bot;
+                continue;
+            }
+            abandon(bot->guid);
+            bot = fill.bots.erase(bot);
+        }
+
+        if (getMSTimeDiff(fill.firstSeen, now) < _bgFillDelay || int32(fill.nextJoin - now) > 0)
+        {
+            ++itr;
+            continue;
+        }
+
+        Battleground* bg = sBattlegroundMgr->GetBattlegroundTemplate(fill.bgTypeId);
+        if (!bg)
+        {
+            ++itr;
+            continue;
+        }
+        uint32 const maxPerTeam = std::max<uint32>(1, bg->GetMaxPlayersPerTeam());
+        uint32 perTeam = _bgBotsPerTeam ? _bgBotsPerTeam : bg->GetMinPlayersPerTeam();
+        perTeam = std::min(std::max<uint32>(perTeam, 1), maxPerTeam);
+
+        int32 need[2] = { int32(perTeam), int32(perTeam) };    // [0] Alliance, [1] Horde
+        for (auto const& pair : fill.queuers)
+            need[pair.second.team == ALLIANCE ? 0 : 1] -= 1 + pair.second.partyBots;
+        for (BgFill::FillBot const& bot : fill.bots)
+            need[bot.team == ALLIANCE ? 0 : 1] -= 1;
+
+        // one bot per JoinInterval, to the team that lacks the most
+        int const side = need[0] >= need[1] ? 0 : 1;
+        if (need[side] > 0 && StartBgBot(fill, side == 0 ? ALLIANCE : HORDE, perTeam))
+            fill.nextJoin = now + _bgJoinInterval;
+        else if (need[1 - side] > 0 && StartBgBot(fill, side == 0 ? HORDE : ALLIANCE, perTeam))
+            fill.nextJoin = now + _bgJoinInterval;
+        ++itr;
+    }
+}
+
+bool PlayerbotMgr::StartBgBot(BgFill& fill, uint32 team, uint32 perTeam)
+{
+    // about one healer in five
+    uint32 healers = 0;
+    for (BgFill::FillBot const& bot : fill.bots)
+        if (bot.team == team && bot.healer)
+            ++healers;
+    bool const wantHealer = healers < std::max<uint32>(1, perTeam / 5);
+
+    auto specsFor = [](uint8 cls, bool healer)
+    {
+        std::vector<uint32> specs;
+        for (uint32 spec : BotFactory::SpecsOfClass(cls))
+            if (ChrSpecializationEntry const* entry = sChrSpecializationStore.LookupEntry(spec))
+                if ((entry->Role == ROLES_HEALER) == healer)
+                    specs.push_back(spec);
+        return specs;
+    };
+
+    std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
+    auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
+
+    // an idle logged-in pool bot of that faction, at most the fill's level; the highest level first, a healer class
+    // first while healers are wanted
+    ObjectGuid bestGuid;
+    Bot* best = nullptr;
+    CharacterInfo const* bestInfo = nullptr;
+    bool bestHeals = false;
+    for (auto& pair : _bots)
+    {
+        Bot& bot = pair.second;
+        if (bot.removing || !bot.inWorld || !bot.notifyGuid.IsEmpty() || bot.init || !onBotAccount(bot.session->GetAccountId()))
+            continue;
+        if (bot.restUntil && int32(bot.restUntil - getMSTime()) > 0)
+            continue;
+        CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);
+        if (!info || Player::TeamForRace(info->Race) != team || info->Level > fill.level)
+            continue;
+        bool const heals = wantHealer && !specsFor(info->Class, true).empty();
+        if (bestInfo && (bestHeals > heals || (bestHeals == heals && info->Level <= bestInfo->Level)))
+            continue;
+        best = &bot;
+        bestGuid = pair.first;
+        bestInfo = info;
+        bestHeals = heals;
+    }
+
+    uint8 const teamBit = team == ALLIANCE ? 1 : 2;
+    if (!best)
+    {
+        if (!(fill.warned & teamBit))
+        {
+            fill.warned |= teamBit;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: no idle %s pool bot of level %u or less for queue %u.",
+                team == ALLIANCE ? "Alliance" : "Horde", uint32(fill.level), uint32(fill.queueType));
+        }
+        return false;
+    }
+
+    std::vector<uint32> specs = specsFor(bestInfo->Class, bestHeals);
+    if (specs.empty())
+        specs = BotFactory::SpecsOfClass(bestInfo->Class);
+    if (specs.empty())
+        return false;
+
+    BotFactory::CreateRequest request;
+    request.cls = bestInfo->Class;
+    request.specId = specs[urand(0, specs.size() - 1)];
+    request.level = fill.level;
+    request.team = team;
+    request.creator = fill.master;
+    request.teleport = false;                               // the battleground takes it there
+
+    best->notifyGuid = fill.master;
+    best->toGMIsland = false;
+    best->ownerGoneTimer = -1;
+    std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(fill.master, best->session->GetAccountId(), true);
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        _ais[bestGuid] = ai;
+    }
+    uint16 const bgTypeId = fill.bgTypeId;
+    ObjectAccessor::PostToPlayer(bestGuid, [ai, request, bgTypeId](Player* p) -> void
+    {
+        ai->JoinBattlegroundFor(p, request, bgTypeId);
+    });
+
+    BgFill::FillBot fillBot;
+    fillBot.guid = bestGuid;
+    fillBot.team = team;
+    fillBot.healer = bestHeals;
+    fillBot.started = getMSTime();
+    fill.bots.push_back(fillBot);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: bot '%s' fills the %s team of queue %u%s.", best->name.c_str(),
+        team == ALLIANCE ? "Alliance" : "Horde", uint32(fill.queueType), bestHeals ? " as a healer" : "");
     return true;
 }
 

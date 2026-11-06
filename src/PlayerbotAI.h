@@ -19,6 +19,7 @@
 #include "BotGear.h"
 #include "BotFormation.h"
 #include "BotApl.h"
+#include "BotBattleground.h"
 #include "LFG.h"
 #include <map>
 #include <set>
@@ -64,6 +65,11 @@ public:
     // the fill was not needed any more (the queuer left the queue): leave the queue if still in it, alone
     // (not grouped yet); true when the bot is free again (no group), so the manager may release it
     bool AbandonLfg(Player* bot);
+    // Battleground fill (PlayerbotMgr::UpdateBgFill): a pool bot set up to the fill's level, then queued alone for
+    // that battleground (bgTypeId, the random one included). Once its battleground is over it is dismissed.
+    void JoinBattlegroundFor(Player* bot, BotFactory::CreateRequest const& request, uint16 bgTypeId);
+    // the fill is not needed any more: leave the queue unless invited or inside; true when the bot is free again
+    bool AbandonBattleground(Player* bot);
     // Owner's rule (2026-11-05): a dismissed random bot (left its master's group, master gone, fill no longer
     // needed) leaves its group, is reset (level, inventory except bags) and goes back to GM Island without a
     // master; an alt bot logs out as before. On the bot's thread.
@@ -136,6 +142,13 @@ private:
     // "find another player" to the leader only, and a bot leader's offer reached nobody)
     void PassLfgLead(Player* bot);
     uint32 _leadTimer = 0;
+    // battlegrounds: accepts invitations (party bots queued with their group, fill bots), then in a battleground its
+    // tactics, death and leaving (BotBattleground::Update)
+    void UpdateBattleground(Player* bot, uint32 diff);
+    BotBattleground::State _bg;
+    uint32 _bgTimer = 0;
+    bool _bgFill = false;                                   // a pool bot filling a battleground queue
+    bool _bgEntered = false;                                // ... that got into its battleground
     // group loot: need on a Playerbots.Loot.NeedUpgradePct upgrade for its spec, greed otherwise (random bots
     // pass when Playerbots.Loot.RandomBotsRoll = 0)
     void UpdateLootRolls(Player* bot);

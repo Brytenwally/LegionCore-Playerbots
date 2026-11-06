@@ -63,6 +63,7 @@ namespace
     float const CriticalHealthPct = 40.0f;                  // triage: healed before interrupts and dispels
     float const HealRange = 35.0f;                          // beyond it (or out of sight) a healer walks closer
     float const HealApproachDistance = 15.0f;
+    float const BattlegroundRange = 40.0f;                  // enemy players this close are fought in a battleground
 
     std::string Lower(std::string text)
     {
@@ -168,6 +169,14 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         }
     }
 
+    _bgTimer += diff;
+    if (_bgTimer >= 500)
+    {
+        uint32 const elapsed = _bgTimer;
+        _bgTimer = 0;
+        UpdateBattleground(bot, elapsed);
+    }
+
     _lootTimer += diff;
     if (_lootTimer >= LootCheckInterval)
     {
@@ -268,6 +277,10 @@ void PlayerbotAI::UpdateFollow(Player* bot)
     // combat owns the movement while engaged (or a healer walks to its heal target); moving would also
     // break a cast; a resting bot stays seated (UpdateRest stands it up when its leader walks off)
     if (_engaged || _resting || !_healMoveGuid.IsEmpty() || !_lootTarget.IsEmpty() || bot->IsNonMeleeSpellCast(false))
+        return;
+
+    // in a battleground or arena the tactics move the bot (BotBattleground::Update); a self-bot is the player's
+    if (!_selfBot && (bot->InBattleground() || bot->InArena()))
         return;
 
     // owner's rule (build #24): no following while the group fights (healers kept running after the player);
@@ -1353,6 +1366,27 @@ Unit* PlayerbotAI::SelectTarget(Player* bot, std::vector<Player*> const& members
             bot->IsValidAttackTarget(unit) && bot->GetDistance(unit) <= range;
     };
 
+    // battlegrounds and arenas (AzerothCore's "enemy player target"): the never-pull rule is for creatures; an enemy
+    // player in reach is fought at once, the current one kept while it stays in reach. A flag carrier does not stop
+    // to fight: it runs home.
+    if (!_selfBot && _assist != AssistMode::Passive && (bot->InBattleground() || bot->InArena()))
+    {
+        if (BotBattleground::CarriesFlag(bot))
+            return nullptr;
+        Unit* current = bot->getVictim();
+        if (current && current->IsPlayer() && current->IsInWorld() && current->IsAlive() && current->GetMap() == bot->GetMap() &&
+            bot->IsValidAttackTarget(current) && bot->GetDistance(current) <= BattlegroundRange + 5.0f)
+        {
+            ordered = true;
+            return current;
+        }
+        if (Unit* enemy = BotBattleground::SelectEnemy(bot, BattlegroundRange))
+        {
+            ordered = true;                                 // no engage delay against players
+            return enemy;
+        }
+    }
+
     Player* owner = FindOwner(members);
     std::vector<Player*> allies;                            // the owner first: his fight is the one to join
     if (owner)
@@ -1826,6 +1860,11 @@ void PlayerbotAI::TalentsOrder(Player* bot, OrderSender const& sender, std::stri
 // by the "leave" order. LogoutBot only raises a flag: the session logs the character out on its own thread.
 void PlayerbotAI::CheckOwnerGroup(Player* bot, uint32 diff)
 {
+    // in a battleground GetGroup() is the battleground's raid of the bot's team (the party is the original group):
+    // the party rules wait until it leaves (a fill bot's master may even play for the other team)
+    if (bot->InBattleground() || bot->InArena())
+        return;
+
     Group* group = bot->GetGroup();
     if (!group)
         _leaveQueued = false;
@@ -2141,6 +2180,63 @@ void PlayerbotAI::JoinLfgFor(Player* bot, BotFactory::CreateRequest const& reque
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' queues for the dungeon finder as %s (%s): %s",
         bot->GetName(), LfgRoleName(role), lfg::ConcatenateDungeons(dungeons).c_str(), summary.c_str());
     sLFGMgr->JoinLfg(bot, role, dungeons);
+}
+
+void PlayerbotAI::UpdateBattleground(Player* bot, uint32 diff)
+{
+    if (bot->InBattleground())
+    {
+        _bgEntered = true;
+        BotBattleground::Update(bot, _bg, _engaged, diff);
+        return;
+    }
+
+    // invited: in (party bots queued with their group by its leader, fill bots)
+    if (BotBattleground::AcceptInvites(bot))
+        return;
+
+    // a fill bot back from its battleground: dismissed (reset, GM Island, free again)
+    if (_bgFill && _bgEntered && !BotBattleground::IsQueued(bot) && !bot->IsBeingTeleported())
+    {
+        _bgFill = false;
+        _bgEntered = false;
+        Dismiss(bot, "its battleground is over");
+    }
+}
+
+void PlayerbotAI::JoinBattlegroundFor(Player* bot, BotFactory::CreateRequest const& request, uint16 bgTypeId)
+{
+    std::string const summary = BotFactory::InitializeNewBot(bot, request);
+    if (bot->GetGroup())
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is in a group: no battleground fill.", bot->GetName());
+        return;
+    }
+    _bgFill = true;
+    _bgEntered = false;
+    uint8 const roles = LfgRoleOf(bot);
+    std::string why;
+    if (!BotBattleground::JoinQueue(bot, bgTypeId, roles, why))
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' could not queue for battleground %u: %s.", bot->GetName(),
+            uint32(bgTypeId), why.c_str());
+        return;
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' queues for battleground %u as %s: %s", bot->GetName(),
+        uint32(bgTypeId), LfgRoleName(roles), summary.c_str());
+}
+
+bool PlayerbotAI::AbandonBattleground(Player* bot)
+{
+    if (bot->InBattleground() || BotBattleground::IsInvited(bot))
+        return false;
+    if (BotBattleground::IsQueued(bot))
+    {
+        BotBattleground::LeaveQueues(bot);
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves its battleground queue: not needed any more.", bot->GetName());
+    }
+    _bgFill = false;
+    return true;
 }
 
 bool PlayerbotAI::AbandonLfg(Player* bot)
@@ -2731,7 +2827,7 @@ void PlayerbotAI::CheckPlayerlessGroup(Player* bot, uint32 diff)
     _groupCheckTimer = 0;
 
     Group* group = bot->GetGroup();
-    if (!group)
+    if (!group || bot->InBattleground() || bot->InArena())
     {
         _playerlessChecks = 0;
         return;

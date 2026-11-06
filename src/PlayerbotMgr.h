@@ -186,6 +186,53 @@ private:
     uint32 _lfgFillDelay = 30000;
     uint32 _lfgJoinInterval = 2000;
 
+    // Battleground fill (owner's request, 2026-11-06), the dungeon finder fill's twin: clients waiting in a normal
+    // battleground queue are reported from their threads; per queue and level bracket, after Playerbots.BG.FillDelay,
+    // idle pool bots of both factions join it one by one until each team has Playerbots.BG.BotsPerTeam players.
+    struct BgReport
+    {
+        ObjectGuid queuer;
+        uint8 queueType = 0;                                // MS::Battlegrounds::BattlegroundQueueTypeId
+        uint16 bgTypeId = 0;                                // its BattlemasterList id (the random one included)
+        uint8 level = 0;
+        uint32 team = 0;
+        uint8 partyBots = 0;                                // bots of his group queued with him (leader only)
+    };
+    struct BgFill
+    {
+        uint8 queueType = 0;
+        uint16 bgTypeId = 0;
+        uint8 level = 0;                                    // the fill bots' level (the first queuer's)
+        ObjectGuid master;                                  // the first queuer: the fill bots' master
+        uint32 firstSeen = 0;
+        uint32 nextJoin = 0;
+        struct Queuer
+        {
+            uint32 team = 0;
+            uint8 partyBots = 0;
+            uint32 lastSeen = 0;
+        };
+        std::map<ObjectGuid, Queuer> queuers;
+        struct FillBot
+        {
+            ObjectGuid guid;
+            uint32 team = 0;
+            bool healer = false;
+            uint32 started = 0;
+        };
+        std::vector<FillBot> bots;
+        uint8 warned = 0;                                   // 1 Alliance, 2 Horde: "no idle pool bot" logged
+    };
+    void ReportBgQueues(Player* player);
+    void UpdateBgFill(std::vector<BgReport> const& reports, uint32 now);
+    bool StartBgBot(BgFill& fill, uint32 team, uint32 perTeam);
+    std::vector<BgReport> _bgReports;                       // _lfgLock
+    std::map<std::pair<uint8, uint8>, BgFill> _bgFills;     // (queue type, bracket) -> fill; world thread only
+    bool _bgFillEnabled = true;
+    uint32 _bgFillDelay = 30000;
+    uint32 _bgJoinInterval = 1000;
+    uint32 _bgBotsPerTeam = 0;
+
     struct Bot
     {
         std::shared_ptr<WorldSession> session;

@@ -686,6 +686,57 @@ Vengeance) keep the module's own lists, to be done by hand later.
   `max_charges|usable|usable_in|adjusted_remains|cooldown`. Set bonus / legendary / trinket names (`QuietName`) and
   sim-only terms (`QuietTerm`: movement, stat.*, Demonology's imp counts...) stay 0 and are no longer reported.
 
+## Battlegrounds (2026-11-06, untested)
+
+Owner's request: PvP and battlegrounds, the tactics of SkyFire / AzerothCore playerbots and the same queue fill as the
+dungeon finder. **SkyFire-playerbots has no battleground code** (PORTING.md: TODO); the reference is AzerothCore's
+mod-playerbots (`BattleGroundJoinAction`, `BGStatusAction`, `BattleGroundTactics.cpp` 4.5k lines). Its code is not
+portable as is: 3.3.5 entries, client area-trigger captures and its value/strategy engine; the ideas are rewritten on
+this core's battlegrounds in `src/pvp/BotBattleground.*`.
+- **What this core gives** (read 2026-11-06): `WorldSession::JoinBattlegroundQueue(bgTypeId, roles, asGroup,
+  IgnorMapInfo)` (the battlemaster join, public) and `HandleBattleFieldPort(Port)` (accept / leave a queue; `Ticket.Id` =
+  the queue slot): this core handles packets on the session's own thread whatever their `PROCESS_*` (the opcode
+  table's `ProcessingPlace` is never read), so the bot calls them directly on its thread. `Battleground::BgObjects` /
+  `BgCreatures` are public. `GetTypeID(true)` = the real map's type (also inside a random battleground), `GetTypeID()` =
+  the queued one. Group queues run the dungeon finder's role check (`InitiBattlgroundCheckRoles`), which party bots
+  already answer (`UpdateLfg`).
+- **Queue**: party bots enter the battleground their leader queued the group for (`AcceptInvites`: every queue slot
+  with an invitation, `Port` accepted); alts too (the player queued them). **Fill** (`PlayerbotMgr::ReportBgQueues` /
+  `UpdateBgFill` / `StartBgBot`, as the dungeon finder fill): clients waiting in a normal queue (`IsFillableQueue`:
+  Alterac Valley .. random; not arenas, rated, brawls, Ashran) report every 2 s; one fill per (queue type, bracket);
+  after `Playerbots.BG.FillDelay` (30 s) one idle pool bot per `JoinInterval` (1 s) joins, to the team that lacks most,
+  until each team has `BotsPerTeam` (0 = the battleground's minimum, never above its maximum; queued players and the
+  leader's party bots count); about one healer in five; set up to the first queuer's level (`InitializeNewBot`,
+  `teleport = false`), then `JoinBattlegroundFor` -> `JoinQueue` alone. Master of the fill bots = the first queuer.
+  A fill bot no longer in the queue after 10 s (`BattlegroundQueue::GetPlayerGroupInfoData`, locked) leaves the fill;
+  when nobody waits any more (the battleground started, or they left) bots still waiting leave the queue
+  (`AbandonBattleground`, `Port` declined) and are dismissed; bots inside play on and are dismissed once back
+  (`UpdateBattleground`: `_bgFill && _bgEntered`).
+- **Inside** (`BotBattleground::Update`, every 500 ms, before combat; `UpdateFollow` stays out): roles as AzerothCore's
+  (about a quarter defend: guid counter % 4 == 0). Dead: after 2 s the spirit is released as `HandleRepopRequest`
+  (`BuildPlayerRepop`, `RepopAtGraveyard`), then every 3 s queued at a spirit healer within 60 yd (`BgCreatures`,
+  `isSpiritService`, `AddPlayerToResurrectQueue`, as `HandleAreaSpiritHealerQueue`): bots always release in a
+  battleground (no order needed there). Over (`STATUS_WAIT_LEAVE`): `LeaveBattleground` after 5 s. Before the doors
+  open, in arenas and while fighting: no tactics. Stuck 8 s on the way: a detour and a new objective.
+- **Combat**: in a battleground or arena `SelectTarget` fights enemy players at once (no engage delay, no never-pull
+  rule): the current one while within 45 yd, else `SelectEnemy` (players of the other team within 40 yd and in sight,
+  the carrier of our flag counts 30 yd nearer, the wounded a little). A flag carrier fights nothing (runs home).
+- **Flags** (Warsong Gulch 2, Twin Peaks 108; Legion entries 227741 / 227740 stands, 227745 / 227744 dropped; carrier
+  auras 156618 / 156621): the carrier goes to its capture area trigger (3646 / 3647, Twin Peaks 5904 / 5905: the server
+  captures, `_CheckPositions`); a dropped flag within 40 yd is used (picked up or returned); the enemy carrier is
+  chased (defenders always, attackers 70%); defenders guard their flag stand; attackers escort their carrier within 60
+  yd, else go for the enemy flag and use it (`GameObject::Use` -> `EventPlayerClickedOnFlag`, 4 yd).
+- **Bases**: any battleground whose `BgObjects` hold `GAMEOBJECT_TYPE_CAPTURE_POINT` banners (Arathi Basin, Battle for
+  Gilneas, Deepwind Gorge...). Owner = the banner's `GAMEOBJECT_FIELD_SPELL_VISUAL_ID` (`UpdateCapturePoint`: visual 1
+  neutral, 2 / 3 Horde / Alliance assault, 4 / 5 Horde / Alliance held). Attackers take the nearest banner not ours (with
+  up to 60 yd of random so a team spreads), defenders guard one of ours (an enemy assault on it is retaken). At 4 yd the
+  banner is opened with its lock's spell (`OpenSpellFor`: the spell whose `SPELL_EFFECT_OPEN_LOCK` has the lock's type,
+  a cast-time one first, indexed once) as a client would, else used directly.
+- **Others** (Eye of the Storm towers and flag, Alterac Valley, Isle of Conquest, Strand, Silvershard, Kotmogu,
+  Seething Shore): the nearest enemy player anywhere, else a teammate more than 20 yd away. Not yet: their own tactics
+  (AzerothCore has AV / EotS / IoC ones), waypoint paths (pathfinding only: `MovePoint` with mmaps), mounts, arenas
+  queues and tactics, rated play, vehicles.
+
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
 Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.
