@@ -819,7 +819,29 @@ alts: an alt's existing enchants are never replaced, only bare items get one).
   water, not resting / looting / casting: `MountSpellFor` (a flier when the leader flies, `IsFlying` / `SPELL_AURA_FLY`,
   and the bot has Expert riding or better, else a ground mount; its own known mount spells, fliers by our lists or
   `MountTypeID` 247 / 248), stand still, cast. Leader dismounted, a fight, or the bot engaging (`Engage`): dismount.
-  Not in battlegrounds / arenas. Following a flying leader in the air is left to the core's follow movement (untested).
+  Not in battlegrounds / arenas.
+- **Flying follow** (owner, build #33: "flying following is a bit messy"). Cause: the core's `FollowMovementGenerator`
+  for players plans the path on the ground mesh (`PathGenerator`; the shortcut through the air is allowed only for
+  creatures that fly), and aims at `GetClosePoint`; in the air the path has no start polygon, fails (`PATHFIND_NOPATH`)
+  and the bot stops and retries every 500 ms. SkyFire (`SetBotFlyingMovement`, airborne branch of its follow) and
+  AzerothCore (`MovementAction::UpdateMovementState`) fly bots by hand; so now `PlayerbotAI::UpdateFlyingFollow`
+  (before the ground follow in `UpdateFollow`):
+  - leader **airborne** = may fly (fly flags or `SPELL_AURA_FLY`) and more than 3 yd above ground / water (SkyFire: a
+    client keeps its fly flags while running on the ground with a flier, so flags alone lie);
+  - bot on a **flying mount with flying riding**: `SetFlying(true)` (can fly, gravity off, `MOVEMENTFLAG_FLYING`,
+    `SendMovementFlagUpdate`; a bot has no client to send them), `MovePoint` without path to its formation slot at the
+    leader's height, aimed half a second ahead of a moving leader, at his flight speed (x1.3 beyond 15 yd); near
+    teleport into the air beside him beyond 80 yd or 60 yd of height. `MoveSplineInit` makes the spline a flying one
+    by the flags;
+  - leader landed: the bot flies down to its slot beside him, clears the flags once within 1.5 yd of the ground
+    (`SetFlying(false)` always clears can-fly: SkyFire's bots hovered with it kept) and walks on;
+  - bot that cannot fly: `MovePoint` with path on the ground beneath his slot, teleport beyond 100 yd;
+  - takeoff while on a ground mount (`UpdateMount`): it dismounts and takes its flier at the next check; it mounts a
+    flier from the start when the leader's mount is one;
+  - `Dismount` (leader dismounts, a fight, engaging) in the air: flags cleared and a **fall spline** launched by hand
+    (`MoveSplineInit::SetFall`): `MotionMaster::MoveFall` only sets the falling flag for a player and leaves the fall
+    to his client, so a bot would hang in the air. `UpdateFollow` waits while that fall runs.
+  **Rule: a bot has no client; anything the core leaves to a player's client (flying flags, falls) the module does.**
 - **Enchants and gems** (`ApplyEnchantsAndGems`): candidates once (`BuildCandidates`): Enchanting recipes
   (`SkillLineAbility` of `SKILL_ENCHANTING`) and item enhancements with a required level, whose spell has
   `SPELL_EFFECT_ENCHANT_ITEM`; gems (`ITEM_CLASS_GEM`, `GemProperties` fitting prismatic sockets, not unique, not relics);
@@ -944,6 +966,10 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   Battleground tactics (same build): **rudimentary but working**, a solid base; their logic is to be improved later.
   The place-for-a-player and top-up rules are **not testable yet**: they need a second human player (to be tested once
   the project is public).
+- 2026-11-07, owner's test of build #33 (maintenance, riding, mounts): **works**: `maintenance` fully, party bots mount
+  with their leader, random bots start with the riding of their level, allied races get their racial mounts.
+  **Problem**: following a flying leader is messy (core follow plans on the ground mesh); rewritten in the commit after
+  (see "Flying follow").
 
 ## Checking
 

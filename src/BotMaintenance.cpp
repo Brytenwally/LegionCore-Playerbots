@@ -306,6 +306,16 @@ namespace BotMaintenance
                 bot->removeSpell(riding.spellId, false, false);
     }
 
+    bool CanFlyByRiding(Player* bot)
+    {
+        return ::CanFlyByRiding(bot);
+    }
+
+    bool IsFlyingMountSpell(uint32 spellId)
+    {
+        return IsFlyingMount(spellId);
+    }
+
     uint32 MountSpellFor(Player* bot, bool flying)
     {
         if (bot->getLevel() < 20 || !bot->HasSpell(33388))

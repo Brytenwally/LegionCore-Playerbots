@@ -34,6 +34,8 @@
 #include "SpellMgr.h"
 #include "Timer.h"
 #include "MotionMaster.h"
+#include "MoveSpline.h"
+#include "MoveSplineInit.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Opcodes.h"
@@ -275,8 +277,39 @@ void PlayerbotAI::HandleGroupInvite(Player* bot)
         accept ? "accepts" : "declines", leader.ToString().c_str());
 }
 
-// Owner's rule (2026-11-07): a bot in a party mounts when its leader mounts (a flier when he flies and its riding allows,
-// else a ground mount) and dismounts when he dismounts or a fight starts; only outdoors, with a mount and riding
+namespace
+{
+    // height over the ground or water below (a lot when nothing is found below a flying unit)
+    float HeightAboveGround(WorldObject const* object)
+    {
+        float const x = object->GetPositionX(), y = object->GetPositionY(), z = object->GetPositionZ();
+        float ground = object->GetMap()->GetWaterOrGroundLevel(object->GetPhases(), x, y, z + 0.5f);
+        if (ground <= INVALID_HEIGHT)
+            ground = object->GetHeight(x, y, z + 0.5f, true, MAX_FALL_DISTANCE);
+        if (ground <= INVALID_HEIGHT)
+            return 1000.0f;
+        return z - ground;
+    }
+
+    // a unit really in the air: it may fly (flags or a flight aura) and is more than 3 yd up. SkyFire's rule: in
+    // flyable zones the client keeps its fly flags while running on the ground with a flier, so flags alone lie
+    bool IsAirborne(Unit const* unit)
+    {
+        if (!unit->IsFlying() && !unit->HasUnitMovementFlag(MOVEMENTFLAG_CAN_FLY) && !unit->HasAuraType(SPELL_AURA_FLY))
+            return false;
+        return HeightAboveGround(unit) > 3.0f;
+    }
+
+    uint32 MountSpellOf(Unit const* unit)
+    {
+        Unit::AuraEffectList const& mounts = unit->GetAuraEffectsByType(SPELL_AURA_MOUNTED);
+        return mounts.empty() ? 0 : mounts.front()->GetId();
+    }
+}
+
+// Owner's rule (2026-11-07): a bot in a party mounts when its leader mounts (a flier when he flies or rides a flier and
+// its riding allows, else a ground mount) and dismounts when he dismounts or a fight starts; only outdoors, with a mount
+// and riding. Build #33: a bot on a ground mount whose leader takes off swaps to its flier
 void PlayerbotAI::UpdateMount(Player* bot)
 {
     bool const mounted = bot->HasAuraType(SPELL_AURA_MOUNTED);
@@ -285,7 +318,7 @@ void PlayerbotAI::UpdateMount(Player* bot)
     if (_engaged || _groupInFight || bot->isInCombat())
     {
         if (mounted)
-            bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            Dismount(bot);
         return;
     }
     Group* group = bot->GetGroup();
@@ -303,14 +336,27 @@ void PlayerbotAI::UpdateMount(Player* bot)
     if (!leader->HasAuraType(SPELL_AURA_MOUNTED))
     {
         if (mounted)
-            bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            Dismount(bot);
         return;
     }
-    if (mounted || bot->IsNonMeleeSpellCast(false) || _resting || !_lootTarget.IsEmpty())
+    bool const leaderAir = IsAirborne(leader);
+    bool const flying = leaderAir || BotMaintenance::IsFlyingMountSpell(MountSpellOf(leader));
+    if (mounted)
+    {
+        // the leader took off while the bot sits on a ground mount: get off and take its flier (next check)
+        if (leaderAir && !_flying && BotMaintenance::CanFlyByRiding(bot) &&
+            !BotMaintenance::IsFlyingMountSpell(MountSpellOf(bot)))
+        {
+            uint32 const flier = BotMaintenance::MountSpellFor(bot, true);
+            if (flier && BotMaintenance::IsFlyingMountSpell(flier))
+                Dismount(bot);
+        }
+        return;
+    }
+    if (bot->IsNonMeleeSpellCast(false) || _resting || !_lootTarget.IsEmpty())
         return;
     if (bot->IsInWater() || !bot->GetMap()->IsOutdoors(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ()))
         return;
-    bool const flying = leader->IsFlying() || leader->HasAuraType(SPELL_AURA_FLY);
     uint32 const spell = BotMaintenance::MountSpellFor(bot, flying);
     if (!spell)
         return;
@@ -320,9 +366,179 @@ void PlayerbotAI::UpdateMount(Player* bot)
     bot->CastSpell(bot, spell, false);
 }
 
+// SkyFire's SetBotFlyingMovement / AzerothCore's UpdateMovementState: the three flags a flying client sends (can fly,
+// gravity off, flying), set on the server since a bot has no client, and told to the players around
+void PlayerbotAI::SetFlying(Player* bot, bool enable)
+{
+    if (enable)
+    {
+        if (_flying && bot->CanFly() && bot->IsLevitating() && bot->HasUnitMovementFlag(MOVEMENTFLAG_FLYING))
+            return;
+        bot->SetCanFly(true);
+        bot->SetDisableGravity(true);
+        bot->AddUnitMovementFlag(MOVEMENTFLAG_FLYING);
+        bot->RemoveUnitMovementFlag(MovementFlags(MOVEMENTFLAG_FALLING | MOVEMENTFLAG_FALLING_FAR));
+        bot->SendMovementFlagUpdate();
+        _flying = true;
+        return;
+    }
+    if (!_flying && !bot->IsFlying())
+        return;
+    _flying = false;
+    _airMove = false;
+    bot->RemoveUnitMovementFlag(MOVEMENTFLAG_MASK_MOVING_FLY);
+    bot->SetDisableGravity(false);
+    // always cleared (SkyFire: a can-fly flag kept from the mount left bots hovering over the ground, and server
+    // splines of a unit that can fly are flying splines)
+    bot->SetCanFly(false);
+    bot->SendMovementFlagUpdate();
+}
+
+void PlayerbotAI::Dismount(Player* bot)
+{
+    bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+    if (!_flying && !bot->IsFlying())
+        return;
+    SetFlying(bot, false);
+    _followGuid.Clear();
+    // MotionMaster::MoveFall leaves a player's fall to his client: a bot would hang in the air. A fall spline instead
+    float const x = bot->GetPositionX(), y = bot->GetPositionY(), z = bot->GetPositionZ();
+    float const ground = bot->GetHeight(x, y, z, true, MAX_FALL_DISTANCE);
+    if (ground <= INVALID_HEIGHT || z - ground < 1.0f)
+        return;
+    bot->GetMotionMaster()->Clear();
+    bot->GetMotionMaster()->MoveIdle();
+    Movement::MoveSplineInit init(*bot);
+    init.MoveTo(x, y, ground, false);
+    init.SetFall();
+    init.Launch();
+}
+
+// Owner, build #33: following a flying leader was messy. The core's follow movement plans a player's path on the ground
+// mesh: in the air there is no polygon under the bot, the path fails and the bot stops and retries. SkyFire and
+// AzerothCore fly bots themselves: fly flags, straight points at the leader's height, a teleport when far behind
+bool PlayerbotAI::UpdateFlyingFollow(Player* bot, Player* leader, float slotDistance, float slotAngle)
+{
+    MotionMaster* motion = bot->GetMotionMaster();
+    bool const leaderAir = IsAirborne(leader);
+    bool const mounted = bot->HasAuraType(SPELL_AURA_MOUNTED);
+    bool const canFly = mounted && BotMaintenance::CanFlyByRiding(bot) &&
+        BotMaintenance::IsFlyingMountSpell(MountSpellOf(bot));
+
+    float x, y, z;
+    leader->GetClosePoint(x, y, z, bot->GetObjectSize(), slotDistance, slotAngle);
+
+    if (leaderAir && canFly)
+    {
+        z = leader->GetPositionZ();                         // his height, never the ground under the slot
+        // aim where he will be at the next check, so the bot does not stop behind him every half second
+        float const leaderSpeed = leader->GetSpeed(MOVE_FLIGHT);
+        if (leader->isMoving())
+        {
+            float const o = leader->GetOrientation();
+            x += std::cos(o) * leaderSpeed * 0.5f;
+            y += std::sin(o) * leaderSpeed * 0.5f;
+        }
+        if (!_flying)
+        {
+            motion->Clear();
+            motion->MoveIdle();
+            _airMove = false;
+        }
+        SetFlying(bot, true);
+        _followGuid.Clear();
+
+        // far behind or far below (a remount, a flight path): into the air beside him
+        if (bot->GetDistance2d(leader) > 80.0f || std::fabs(leader->GetPositionZ() - bot->GetPositionZ()) > 60.0f)
+        {
+            bot->NearTeleportTo(x, y, z, leader->GetOrientation());
+            _flying = false;                                // flags again after the teleport
+            _airMove = false;
+            return true;
+        }
+
+        float const toPoint = bot->GetExactDist(x, y, z);
+        if (toPoint < 1.5f && !leader->isMoving())
+            return true;
+        if (_airMove && !bot->movespline->Finalized() && _airPoint.GetExactDist(x, y, z) < 1.0f)
+            return true;
+        float speed = std::max(bot->GetSpeed(MOVE_FLIGHT), leaderSpeed);
+        if (toPoint > 15.0f)
+            speed *= 1.3f;                                  // catch up
+        motion->MovePoint(0, x, y, z, false, speed);
+        _airPoint.Relocate(x, y, z);
+        _airMove = true;
+        return true;
+    }
+
+    if (_flying || bot->IsFlying())
+    {
+        if (!mounted)
+        {
+            Dismount(bot);
+            return true;
+        }
+        // the leader landed (or the bot cannot fly any more): come down to its slot beside him, then walk
+        if (HeightAboveGround(bot) < 1.5f)
+        {
+            SetFlying(bot, false);
+            _followGuid.Clear();
+            return false;
+        }
+        float ground = bot->GetHeight(x, y, (leaderAir ? z : leader->GetPositionZ()) + 2.0f, true, MAX_FALL_DISTANCE);
+        if (ground <= INVALID_HEIGHT)
+            ground = leader->GetPositionZ();
+        if (bot->GetDistance2d(leader) > 80.0f)
+        {
+            bot->NearTeleportTo(x, y, ground, leader->GetOrientation());
+            SetFlying(bot, false);
+            _followGuid.Clear();
+            return true;
+        }
+        if (_airMove && !bot->movespline->Finalized() && _airPoint.GetExactDist(x, y, ground) < 1.0f)
+            return true;
+        motion->MovePoint(0, x, y, ground, false, bot->GetSpeed(MOVE_FLIGHT));
+        _airPoint.Relocate(x, y, ground);
+        _airMove = true;
+        return true;
+    }
+
+    if (leaderAir)
+    {
+        // a bot that cannot fly walks (or rides) on the ground beneath him: the core's follow would aim at the air
+        float const ground = bot->GetHeight(x, y, z + 2.0f, true, MAX_FALL_DISTANCE);
+        if (ground <= INVALID_HEIGHT)
+            return true;
+        _followGuid.Clear();
+        if (bot->GetDistance2d(x, y) > 100.0f)
+        {
+            bot->NearTeleportTo(x, y, ground, leader->GetOrientation());
+            _airMove = false;
+            return true;
+        }
+        if (_airMove && motion->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE &&
+            _airPoint.GetExactDist2d(x, y) < 3.0f)
+            return true;
+        if (bot->GetExactDist2d(x, y) < 2.0f)
+            return true;
+        motion->MovePoint(0, x, y, ground);
+        _airPoint.Relocate(x, y, ground);
+        _airMove = true;
+        return true;
+    }
+
+    _airMove = false;
+    return false;
+}
+
 void PlayerbotAI::UpdateFollow(Player* bot)
 {
+    if (_flying && !bot->IsAlive())
+        SetFlying(bot, false);
     UpdateMount(bot);
+    // falling after a dismount in the air (Dismount): let the fall end before walking on
+    if (!_flying && !bot->movespline->Finalized() && HeightAboveGround(bot) > 1.5f)
+        return;
 
     // combat owns the movement while engaged (or a healer walks to its heal target); moving would also
     // break a cast; a resting bot stays seated (UpdateRest stands it up when its leader walks off)
@@ -375,6 +591,10 @@ void PlayerbotAI::UpdateFollow(Player* bot)
     Player* target = slot.anchor == leaderGuid ? leader : ObjectAccessor::GetPlayer(*bot, slot.anchor);
     if (!target || !target->IsInWorld() || target->IsBeingTeleported())
         target = leader;
+
+    // a flying leader (or a flying bot coming down) is followed by hand
+    if (UpdateFlyingFollow(bot, leader, slot.distance, slot.angle))
+        return;
 
     MotionMaster* motion = bot->GetMotionMaster();
     if (_followGuid == target->GetGUID() && motion->GetCurrentMovementGeneratorType() == FOLLOW_MOTION_TYPE &&
@@ -1523,8 +1743,8 @@ void PlayerbotAI::Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role
     _combatTarget = enemy->GetGUID();
     _engaged = true;
     _followGuid.Clear();
-    if (bot->HasAuraType(SPELL_AURA_MOUNTED))
-        bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+    if (bot->HasAuraType(SPELL_AURA_MOUNTED) || _flying)
+        Dismount(bot);
 
     if (bot->getVictim() != enemy)
         bot->Attack(enemy, melee);

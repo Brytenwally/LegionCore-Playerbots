@@ -124,7 +124,7 @@ When you log out, the bots of your account (your alts) log out with you.
 
 ## Comparison with AzerothCore playerbots
 
-Status as of 2026-11-07: build #32 tested (battleground tactics included); `maintenance` and mounts built after it. **Verified** = tested on the owner's server and working. **Built** = written
+Status as of 2026-11-07: build #33 tested (`maintenance`, riding, mounts); the flying follow rewritten after it. **Verified** = tested on the owner's server and working. **Built** = written
 and compiling, waiting for its in-game test. **Missing** = not started; the roadmap below orders them. AzerothCore's
 code is a 3.3.5 module with its own strategy / trigger / action / value engine; here the same behaviours are rewritten
 directly for Legion, so the comparison is by feature, not by file.
@@ -154,6 +154,8 @@ directly for Legion, so the comparison is by feature, not by file.
 | Battlegrounds | Queue fill of both teams to capacity with a 10/20/70 role mix | `BattleGroundJoin`, random bots in BG queues |
 | Battlegrounds | Guarded pathfinding and waypoint routes (WSG, AB, AV, EotS, IoC): better, but some bots still climb walls and the waypoint walk looks robotic (kept for now) | vmangos `BattleBotPath`s |
 | Battlegrounds | Tactics: Warsong Gulch / Twin Peaks flags; Arathi Basin / Battle for Gilneas / Deepwind Gorge bases; others go where the enemy is: rudimentary but working, a solid base (smarter logic later) | `BGTactics` (WS, AB; AV / EotS / IoC partly) |
+| Upkeep | `maintenance`: talents by blueprint, riding and a racial mount per tier, level-adequate enchants and gems by stat weights, bags, repair | `maintenance` (SkyFire `MaintainBot`) |
+| Movement | Party bots mount and dismount with their leader; random bots set up with riding and a mount; allied races get their racial mounts | `CheckMountState` |
 
 ### Built, waiting for the in-game test
 
@@ -162,8 +164,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Loot | Need / greed / pass rolls by upgrade; equip upgrades from the bags | `LootRoll`, auto-equip upgrades |
 | Battlegrounds | Party bots enter with their leader; bots give a later player their place; top-ups after a refusal (needs a second human player: to be tested once the project is public) | `BattleGroundJoin` |
 | Battlegrounds | PvP targeting, release and spirit healer, leave at the end | BG strategies, `ReleaseSpirit` |
-| Upkeep | `maintenance`: talents by blueprint, riding and a racial mount per tier, level-adequate enchants and gems by stat weights, bags, repair | `maintenance` (SkyFire `MaintainBot`) |
-| Movement | Party bots mount and dismount with their leader (fliers when he flies); random bots set up with riding and a mount | `CheckMountState` |
+| Movement | Following a flying leader: fly flags by hand, straight flight at his height, swap to the flier on takeoff, landing beside him, walking beneath him without flying riding (build #33's flying follow was messy) | `UpdateMovementState`, SkyFire's flying follow |
 
 ### Missing (roadmap)
 
@@ -181,7 +182,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Combat | Ground-effect dodge and fleeing, crowd control, raid target icons (`rti`), focus heal targets, healers dealing damage when idle | avoid AoE, CC, `rti`, focus heal | |
 | Combat | Hand-made lists for the 8 specs without a SimC profile (most healers, Protection Warrior, Vengeance) | class strategies | |
 | Pets | Hunter taming and pet management, warlock pets beyond the precombat summon, pet talents | `Tame`, pet strategies | |
-| Movement | Flight paths, following across maps on its own, flying follow tested | `Taxi` | |
+| Movement | Flight paths, following across maps on its own | `Taxi` | |
 | Items | Vendors (sell, buy, repair), bank, mail, trade with players, use / open / destroy items by order | `Sell`, `Buy`, `RepairAll`, `Bank`, `Mail`, `Trade` | |
 | Items | Consumables (flasks, food buffs), bonus IDs and `Game.Patch` item level tiers, scaling enchants | maintenance consumables | |
 | Legion | Artifact weapons and traits, relics, PvP talents, class halls | none | Legion only |
@@ -192,8 +193,8 @@ directly for Legion, so the comparison is by feature, not by file.
 
 ### Roadmap
 
-1. **Now**: test `maintenance`, riding and mounting with the leader. The place-for-a-player / top-up rules wait for a
-   second human player (once the project is public).
+1. **Now**: test the flying follow. The place-for-a-player / top-up rules wait for a second human player (once the
+   project is public).
 2. **PvP**: own tactics for Eye of the Storm, Alterac Valley and Isle of Conquest (from AzerothCore), then Silvershard,
    Kotmogu, Seething Shore and Strand; arenas (skirmish fill, then tactics), duels.
 3. **Combat depth**: ground-effect dodge, crowd control, raid target icons, hand-made lists for the specs without a

@@ -37,6 +37,10 @@ namespace BotMaintenance
 
     // the mount the bot rides: a flying one when wanted and allowed by its riding, else a ground one; 0 if none
     uint32 MountSpellFor(Player* bot, bool flying);
+    // its riding allows flying (Expert or better)
+    bool CanFlyByRiding(Player* bot);
+    // a mount spell that flies (our faction fliers or a Mount.db2 flying type)
+    bool IsFlyingMountSpell(uint32 spellId);
 
     // Enchants and gems by the spec's stat weights (BotGear::StatWeight), level adequate: enchanting recipes whose skill
     // rank's content is not above the bot's level, item enhancements of a required level it has, gems of a required

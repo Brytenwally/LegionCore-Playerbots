@@ -144,6 +144,12 @@ private:
     void UpdateFollow(Player* bot);
     // mounts / dismounts with its leader (owner's rule, 2026-11-07); called by UpdateFollow
     void UpdateMount(Player* bot);
+    // following a flying leader (owner, build #33), as SkyFire / AzerothCore: fly flags set by hand, straight splines
+    // at his height; a bot that cannot fly walks beneath him; true when it moved the bot (no ground follow then)
+    bool UpdateFlyingFollow(Player* bot, Player* leader, float slotDistance, float slotAngle);
+    void SetFlying(Player* bot, bool enable);
+    // removes the mount; a flying bot loses its fly flags and falls to the ground
+    void Dismount(Player* bot);
     // dungeon finder: answers its group's role check by its spec and accepts proposals, as a client would
     void UpdateLfg(Player* bot);
     // a bot leading a dungeon finder group gives the lead to a real player of it (owner, build #28: the core offers
@@ -214,6 +220,9 @@ private:
     // invite has no guid until someone accepts (an empty guid matched "nothing answered yet")
     void const* _answeredInvite = nullptr;
     ObjectGuid _followGuid;                                 // who the current follow movement targets
+    bool _flying = false;                                   // fly flags set by SetFlying
+    Position _airPoint;                                     // last point given while following in the air / beneath
+    bool _airMove = false;                                  // _airPoint is the movement in progress
     uint32 _followTimer = 0;
     BotFormation::Shape _formation = BotFormation::Shape::Role;
     float _followDistance = 0.0f;                           // the slot the current follow movement keeps
