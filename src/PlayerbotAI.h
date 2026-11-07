@@ -73,6 +73,9 @@ public:
     void JoinBattlegroundFor(Player* bot, BotFactory::CreateRequest const& request, uint16 bgTypeId);
     // the fill is not needed any more: leave the queue unless invited or inside; true when the bot is free again
     bool AbandonBattleground(Player* bot);
+    // a player queued for this battleground and its team is full: the fill bot leaves, so the queue invites him
+    // (owner's rule, 2026-11-07); it is dismissed once out
+    void LeaveBattlegroundForPlayer(Player* bot);
     // Owner's rule (2026-11-05): a dismissed random bot (left its master's group, master gone, fill no longer
     // needed) leaves its group, is reset (level, inventory except bags) and goes back to GM Island without a
     // master; an alt bot logs out as before. On the bot's thread.
@@ -152,6 +155,7 @@ private:
     uint32 _bgTimer = 0;
     bool _bgFill = false;                                   // a pool bot filling a battleground queue
     bool _bgEntered = false;                                // ... that got into its battleground
+    uint32 _bgReportTimer = 0;                              // PlayerbotMgr::ReportBgMember every 2 s inside
     // group loot: need on a Playerbots.Loot.NeedUpgradePct upgrade for its spec, greed otherwise (random bots
     // pass when Playerbots.Loot.RandomBotsRoll = 0)
     void UpdateLootRolls(Player* bot);

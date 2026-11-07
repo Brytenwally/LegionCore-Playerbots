@@ -139,6 +139,7 @@ public:
     void Shutdown();
 
 private:
+    friend class PlayerbotAI;                               // BgMember reports from inside battlegrounds
     PlayerbotMgr() = default;
 
     // Dungeon finder fill (owner's request, 2026-11-05): a client queued for a dungeon (alone or as his group's
@@ -186,17 +187,45 @@ private:
     uint32 _lfgFillDelay = 30000;
     uint32 _lfgJoinInterval = 2000;
 
-    // Battleground fill (owner's request, 2026-11-06), the dungeon finder fill's twin: clients waiting in a normal
+    // Battleground fill (owner's rules, 2026-11-06 / 07), the dungeon finder fill's twin. Clients waiting in a normal
     // battleground queue are reported from their threads; per queue and level bracket, after Playerbots.BG.FillDelay,
-    // idle pool bots of both factions join it one by one until each team has Playerbots.BG.BotsPerTeam players.
+    // idle pool bots of both factions join until each team is full (Playerbots.BG.BotsPerTeam, 0 = the battleground's
+    // maximum) with a fixed role mix (10% tanks, 20% healers rounded down, the rest dps). Every bot and client inside a
+    // battleground reports too (BgMember): a player queueing for a battleground whose team is full makes a fill bot of
+    // his role leave it (the queue then invites him into the freed place), and a team short of players for 30 s with
+    // nobody waiting gets a bot of the missing role (a refused invitation, a bot gone).
     struct BgReport
     {
         ObjectGuid queuer;
         uint8 queueType = 0;                                // MS::Battlegrounds::BattlegroundQueueTypeId
         uint16 bgTypeId = 0;                                // its BattlemasterList id (the random one included)
+        uint8 bracket = 0;                                  // PVPDifficulty RangeIndex
         uint8 level = 0;
         uint32 team = 0;
+        uint8 role = 0;                                     // ROLES_TANK / HEALER / DPS of his spec
         uint8 partyBots = 0;                                // bots of his group queued with him (leader only)
+    };
+    struct BgMember
+    {
+        ObjectGuid guid;
+        uint32 instanceId = 0;
+        uint8 queueType = 0;                                // of the battleground's queued type (random included)
+        uint16 bgTypeId = 0;
+        uint8 bracket = 0;
+        uint8 status = 0;                                   // BattlegroundStatus
+        uint32 maxPerTeam = 0;
+        uint32 team = 0;
+        uint8 role = 0;
+        uint8 level = 0;
+        bool fillBot = false;                               // a pool bot of the fill: it may give its place up
+        uint32 lastSeen = 0;
+    };
+    struct BgFillBot
+    {
+        ObjectGuid guid;
+        uint32 team = 0;
+        uint8 role = 0;
+        uint32 started = 0;
     };
     struct BgFill
     {
@@ -206,22 +235,31 @@ private:
         ObjectGuid master;                                  // the first queuer: the fill bots' master
         uint32 firstSeen = 0;
         uint32 nextJoin = 0;
+        uint32 endedAt = 0;                                 // nobody waits any more: bots still queued get 60 s
         struct Queuer
         {
             uint32 team = 0;
+            uint8 role = 0;
             uint8 partyBots = 0;
             uint32 lastSeen = 0;
         };
         std::map<ObjectGuid, Queuer> queuers;
-        struct FillBot
-        {
-            ObjectGuid guid;
-            uint32 team = 0;
-            bool healer = false;
-            uint32 started = 0;
-        };
-        std::vector<FillBot> bots;
+        std::vector<BgFillBot> bots;
         uint8 warned = 0;                                   // 1 Alliance, 2 Horde: "no idle pool bot" logged
+    };
+    struct BgInstance
+    {
+        uint8 queueType = 0;
+        uint16 bgTypeId = 0;
+        uint8 bracket = 0;
+        uint8 status = 0;
+        uint32 maxPerTeam = 0;
+        uint8 level = 0;
+        uint32 lastSeen = 0;
+        std::map<ObjectGuid, BgMember> members;
+        std::vector<BgFillBot> pending;                     // top-up bots queued for it, not inside yet
+        uint32 shortSince[2] = { 0, 0 };                    // getMSTime a team became short of players, 0 = full
+        uint32 nextJoin = 0;
     };
     // Dungeon finder groups short of members (owner, builds #28-#31: after a kick or a leave the core's replacement
     // queue never matched the group with a bot, though a player's invite brought one in at once): the group's leader,
@@ -255,10 +293,21 @@ private:
     std::vector<ReplaceReport> _replaceReports;             // _lfgLock
     std::map<ObjectGuid, ReplaceFill> _replaceFills;        // by group; world thread only
     void ReportBgQueues(Player* player);
-    void UpdateBgFill(std::vector<BgReport> const& reports, uint32 now);
-    bool StartBgBot(BgFill& fill, uint32 team, uint32 perTeam);
+    void UpdateBgFill(std::vector<BgReport> const& reports, std::vector<BgMember> const& members, uint32 now);
+    // a team of the battleground needs: the role mix of perTeam players minus those it has
+    static void RoleNeeds(uint32 perTeam, std::vector<uint8> const& roles, int32 need[3]);
+    // an idle pool bot of that faction and role, at most `level`, set up and queued for bgTypeId; empty if none
+    ObjectGuid StartBgBot(uint32 team, uint8 role, uint8 level, uint16 bgTypeId, ObjectGuid const& master, uint8& warned);
+    bool MakeRoomFor(BgReport const& report, uint32 now);
+public:
+    // any thread: a bot or a client inside a battleground (every 2 s)
+    void ReportBgMember(BgMember const& member);
+private:
     std::vector<BgReport> _bgReports;                       // _lfgLock
+    std::vector<BgMember> _bgMemberReports;                 // _lfgLock
     std::map<std::pair<uint8, uint8>, BgFill> _bgFills;     // (queue type, bracket) -> fill; world thread only
+    std::map<uint32, BgInstance> _bgInstances;              // instance id -> who is in it; world thread only
+    std::map<ObjectGuid, uint32> _bgRoomMade;               // queuer -> getMSTime a bot left for him
     bool _bgFillEnabled = true;
     uint32 _bgFillDelay = 30000;
     uint32 _bgJoinInterval = 1000;

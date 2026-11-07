@@ -729,6 +729,22 @@ this core's battlegrounds in `src/pvp/BotBattleground.*`.
   when nobody waits any more (the battleground started, or they left) bots still waiting leave the queue
   (`AbandonBattleground`, `Port` declined) and are dismissed; bots inside play on and are dismissed once back
   (`UpdateBattleground`: `_bgFill && _bgEntered`).
+- **Full battlegrounds, role mix, places for players** (owner's rules, 2026-11-07): `BotsPerTeam = 0` now means the
+  battleground's **maximum** (Warsong Gulch 10, Arathi Basin 15...), not its minimum. Each team gets a fixed mix
+  (`RoleNeeds`): `perTeam / 10` tanks, `perTeam / 5` healers, the rest dps (WSG 1 / 2 / 7, AB 1 / 3 / 11); queued
+  players count with their spec role (`BgReport::role`), party bots as dps, an extra tank / healer takes a dps place.
+  `StartBgBot(team, role, level, bgTypeId, master)` picks an idle pool bot of a class with a spec of that role, at
+  random. Every client and bot **inside** a battleground reports itself every 2 s (`BgMember`: instance, queued type ->
+  queue type, bracket `GetBracketId`, status, max per team, team `GetBGTeam`, role, fill bot or not; clients from
+  `ReportBgQueues`, bots from `UpdateBattleground`); the world thread keeps `_bgInstances`. **Room for a player**
+  (`MakeRoomFor`): a queued player's report finds a running instance of his queue type and bracket whose team is full
+  and holds a fill bot: a fill bot of his role (else a dps) leaves (`LeaveBattlegroundForPlayer` ->
+  `LeaveBattleground`, dismissed once out), so the core's queue update invites him into the free place
+  (`BattlegroundQueue` fills running battlegrounds from `BGFreeSlotQueue` first, `FillPlayersToBG`); once per player per
+  90 s, and no new fill for him meanwhile. **Top-up**: a running instance with fill bots whose team stays short for
+  `FillDelay` with nobody waiting in that queue (a refused invitation, someone gone) queues a bot of the missing role
+  (one per `JoinInterval`, pending until it reports from inside, abandoned after 60 s). A fill whose players got in keeps
+  its still-queued bots 60 s more (`BgFill::endedAt`), so the running battleground fills up before they give up.
 - **Inside** (`BotBattleground::Update`, every 500 ms, before combat; `UpdateFollow` stays out): roles as AzerothCore's
   (about a quarter defend: guid counter % 4 == 0). Dead: after 2 s the spirit is released as `HandleRepopRequest`
   (`BuildPlayerRepop`, `RepopAtGraveyard`), then every 3 s queued at a spirit healer within 60 yd (`BgCreatures`,

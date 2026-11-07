@@ -2190,6 +2190,30 @@ void PlayerbotAI::UpdateBattleground(Player* bot, uint32 diff)
     {
         _bgEntered = true;
         BotBattleground::Update(bot, _bg, _engaged, diff);
+
+        // who is in which battleground, for the fill (room for a queued player, top-ups)
+        _bgReportTimer += diff;
+        Battleground* bg = bot->GetBattleground();
+        if (_bgReportTimer >= 2000 && bg && !bg->IsArena())
+        {
+            _bgReportTimer = 0;
+            PlayerbotMgr::BgMember member;
+            member.guid = bot->GetGUID();
+            member.instanceId = bg->GetInstanceID();
+            member.bgTypeId = bg->GetTypeID();
+            member.queueType = MS::Battlegrounds::GetBgQueueTypeIdByBgTypeID(member.bgTypeId);
+            member.bracket = bg->GetBracketId();
+            member.status = uint8(bg->GetStatus());
+            member.maxPerTeam = bg->GetMaxPlayersPerTeam();
+            member.team = bot->GetBGTeam();
+            member.role = ROLES_DPS;
+            if (ChrSpecializationEntry const* spec = sChrSpecializationStore.LookupEntry(bot->GetSpecializationId()))
+                if (spec->Role <= ROLES_DPS)
+                    member.role = spec->Role;
+            member.level = bot->getLevel();
+            member.fillBot = _bgFill;
+            sPlayerbotMgr->ReportBgMember(member);
+        }
         return;
     }
 
@@ -2226,6 +2250,14 @@ void PlayerbotAI::JoinBattlegroundFor(Player* bot, BotFactory::CreateRequest con
     }
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' queues for battleground %u as %s: %s", bot->GetName(),
         uint32(bgTypeId), LfgRoleName(roles), summary.c_str());
+}
+
+void PlayerbotAI::LeaveBattlegroundForPlayer(Player* bot)
+{
+    if (!bot->InBattleground() || !_bgFill)
+        return;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' leaves its battleground: a player queued for its place.", bot->GetName());
+    bot->LeaveBattleground();                               // UpdateBattleground dismisses it once out
 }
 
 bool PlayerbotAI::AbandonBattleground(Player* bot)

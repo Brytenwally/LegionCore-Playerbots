@@ -273,11 +273,14 @@ Playerbots.LFG.JoinInterval = 2000
 #    Playerbots.BG.BotsPerTeam
 #        A player who queues for a battleground (a specific one or the random battleground; alone or
 #        with his group): FillDelay ms later, idle pool bots of both factions (logged in on GM Island,
-#        at most his level) join the same queue one every JoinInterval ms, each set up to his level in
-#        a random spec of its class (about one healer in five), until each team has BotsPerTeam
-#        players (0 = the battleground's minimum, never more than its maximum); the players and party
-#        bots already queued count. If nobody waits in that queue any more, bots still waiting leave it
-#        and go back to GM Island; bots that got in play the battleground and go back once it is over.
+#        at most his level) join the same queue one every JoinInterval ms, each set up to his level,
+#        until each team has BotsPerTeam players (0 = the battleground's maximum: 10 in Warsong Gulch,
+#        15 in Arathi Basin...) with a fixed role mix: 10% tanks and 20% healers rounded down, the
+#        rest dps (Warsong Gulch 1 / 2 / 7, Arathi Basin 1 / 3 / 11). Queued players and party bots
+#        count. While a battleground the bots fill is running, a player of that level who queues for
+#        it takes the place of a fill bot of his role (the bot leaves, the queue invites him); a team
+#        short of players for FillDelay ms with nobody waiting (a refused invitation, someone gone)
+#        gets a bot of the missing role. Bots go back to GM Island once their battleground is over.
 #        Arenas, rated battlegrounds, brawls and Ashran are not filled. Party bots always enter the
 #        battleground their leader queued the group for.
 #        Default: 1, 30000, 1000, 0

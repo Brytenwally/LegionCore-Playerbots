@@ -23,6 +23,7 @@
 #include "World.h"
 #include "WorldSession.h"
 #include <algorithm>
+#include <set>
 
 namespace
 {
@@ -934,12 +935,14 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
 
     std::vector<QueueReport> reports;
     std::vector<BgReport> bgReports;
+    std::vector<BgMember> bgMembers;
     std::vector<ReplaceReport> replaceReports;
     std::vector<ObjectGuid> releases;
     {
         std::lock_guard<std::mutex> lock(_lfgLock);
         reports.swap(_queueReports);
         bgReports.swap(_bgReports);
+        bgMembers.swap(_bgMemberReports);
         replaceReports.swap(_replaceReports);
         releases.swap(_releaseRequests);
     }
@@ -947,7 +950,7 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
         ReleaseBot(guid);
 
     uint32 const now = getMSTime();
-    UpdateBgFill(bgReports, now);
+    UpdateBgFill(bgReports, bgMembers, now);
     UpdateReplaceFill(replaceReports, now);
     for (QueueReport const& report : reports)
     {
@@ -1369,12 +1372,53 @@ bool PlayerbotMgr::StartReplaceBot(ReplaceFill& fill, uint8 role)
     return true;
 }
 
-// ---- Battleground fill (2026-11-06) ---------------------------------------------------------------------
+// ---- Battleground fill (2026-11-06 / 07) ----------------------------------------------------------------
 
-// the client's thread, every 2 s: each normal battleground queue he waits in (not invited yet)
+namespace
+{
+    uint8 SpecRoleOf(Player* player)
+    {
+        if (ChrSpecializationEntry const* spec = sChrSpecializationStore.LookupEntry(player->GetSpecializationId()))
+            if (spec->Role <= ROLES_DPS)
+                return spec->Role;
+        return ROLES_DPS;
+    }
+
+    char const* RoleText(uint8 role)
+    {
+        return role == ROLES_TANK ? "tank" : role == ROLES_HEALER ? "healer" : "dps";
+    }
+
+    int TeamIndex(uint32 team)
+    {
+        return team == ALLIANCE ? 0 : 1;
+    }
+}
+
+// the client's thread, every 2 s: each normal battleground queue he waits in (not invited yet), or the battleground
+// he is in
 void PlayerbotMgr::ReportBgQueues(Player* player)
 {
-    if (player->InBattleground() || !BotBattleground::IsQueued(player))
+    if (player->InBattleground())
+    {
+        Battleground* bg = player->GetBattleground();
+        if (!bg || bg->IsArena())
+            return;
+        BgMember member;
+        member.guid = player->GetGUID();
+        member.instanceId = bg->GetInstanceID();
+        member.bgTypeId = bg->GetTypeID();
+        member.queueType = MS::Battlegrounds::GetBgQueueTypeIdByBgTypeID(member.bgTypeId);
+        member.bracket = bg->GetBracketId();
+        member.status = uint8(bg->GetStatus());
+        member.maxPerTeam = bg->GetMaxPlayersPerTeam();
+        member.team = player->GetBGTeam();
+        member.role = SpecRoleOf(player);
+        member.level = player->getLevel();
+        ReportBgMember(member);
+        return;
+    }
+    if (!BotBattleground::IsQueued(player))
         return;
 
     std::vector<BgReport> reports;
@@ -1389,14 +1433,19 @@ void PlayerbotMgr::ReportBgQueues(Player* player)
         report.bgTypeId = MS::Battlegrounds::GetBgTemplateIdByQueueTypeID(queue);
         report.level = player->getLevel();
         report.team = player->GetTeam();
+        report.role = SpecRoleOf(player);
+        Battleground* bg = report.bgTypeId ? sBattlegroundMgr->GetBattlegroundTemplate(report.bgTypeId) : nullptr;
+        PVPDifficultyEntry const* bracket = bg ? sDB2Manager.GetBattlegroundBracketByLevel(bg->GetMapId(), report.level) : nullptr;
+        if (!bracket)
+            continue;
+        report.bracket = bracket->RangeIndex;
         // the bots of his group queued with it (a group queues as one: its leader counts them)
         if (Group* group = player->GetGroup())
             if (group->GetLeaderGUID() == player->GetGUID())
                 for (Group::MemberSlot const& slot : group->GetMemberSlots())
                     if (slot.Guid != player->GetGUID() && IsBot(slot.Guid))
                         ++report.partyBots;
-        if (report.bgTypeId)
-            reports.push_back(report);
+        reports.push_back(report);
     }
     if (reports.empty())
         return;
@@ -1404,30 +1453,125 @@ void PlayerbotMgr::ReportBgQueues(Player* player)
     _bgReports.insert(_bgReports.end(), reports.begin(), reports.end());
 }
 
-void PlayerbotMgr::UpdateBgFill(std::vector<BgReport> const& reports, uint32 now)
+void PlayerbotMgr::ReportBgMember(BgMember const& member)
 {
+    std::lock_guard<std::mutex> lock(_lfgLock);
+    _bgMemberReports.push_back(member);
+}
+
+// owner's rule: 10% tanks, 20% healers (rounded down), the rest dps; need[] = what perTeam players lack after `roles`
+void PlayerbotMgr::RoleNeeds(uint32 perTeam, std::vector<uint8> const& roles, int32 need[3])
+{
+    need[ROLES_TANK] = int32(perTeam / 10);
+    need[ROLES_HEALER] = int32(perTeam / 5);
+    need[ROLES_DPS] = int32(perTeam) - need[ROLES_TANK] - need[ROLES_HEALER];
+    for (uint8 role : roles)
+    {
+        uint8 r = role <= ROLES_DPS ? role : ROLES_DPS;
+        if (need[r] <= 0)                                   // an extra tank or healer takes a dps place
+            r = ROLES_DPS;
+        --need[r];
+    }
+}
+
+// A player queues for a battleground whose team is full of fill bots: a bot of his role (else a dps) leaves it, the
+// queue then invites him into that place instead of waiting for a new battleground
+bool PlayerbotMgr::MakeRoomFor(BgReport const& report, uint32 now)
+{
+    auto made = _bgRoomMade.find(report.queuer);
+    if (made != _bgRoomMade.end() && getMSTimeDiff(made->second, now) < 90000)
+        return true;                                        // done for him already: the invitation is on its way
+
+    for (auto& pair : _bgInstances)
+    {
+        BgInstance& instance = pair.second;
+        if (instance.queueType != report.queueType || instance.bracket != report.bracket ||
+            instance.status < STATUS_WAIT_JOIN || instance.status >= STATUS_WAIT_LEAVE)
+            continue;
+        uint32 inTeam = 0;
+        BgMember const* sameRole = nullptr;
+        BgMember const* anyBot = nullptr;
+        for (auto const& m : instance.members)
+        {
+            if (m.second.team != report.team)
+                continue;
+            ++inTeam;
+            if (!m.second.fillBot)
+                continue;
+            if (m.second.role == report.role && !sameRole)
+                sameRole = &m.second;
+            if (!anyBot || (m.second.role == ROLES_DPS && anyBot->role != ROLES_DPS))
+                anyBot = &m.second;
+        }
+        if (inTeam < instance.maxPerTeam || !anyBot)
+            continue;                                       // a free place already, or no bot to send away
+        BgMember const* leaver = sameRole ? sameRole : anyBot;
+        ObjectGuid const guid = leaver->guid;
+        if (std::shared_ptr<PlayerbotAI> ai = GetAI(guid))
+            ObjectAccessor::PostToPlayer(guid, [ai](Player* bot) -> void { ai->LeaveBattlegroundForPlayer(bot); });
+        instance.members.erase(guid);
+        _bgRoomMade[report.queuer] = now;
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: a %s bot leaves battleground %u (instance %u) for %s, who queued.",
+            RoleText(leaver->role), uint32(instance.bgTypeId), pair.first, report.queuer.ToString().c_str());
+        return true;
+    }
+    return false;
+}
+
+void PlayerbotMgr::UpdateBgFill(std::vector<BgReport> const& reports, std::vector<BgMember> const& members, uint32 now)
+{
+    // who is in which battleground
+    for (BgMember const& report : members)
+    {
+        BgInstance& instance = _bgInstances[report.instanceId];
+        instance.queueType = report.queueType;
+        instance.bgTypeId = report.bgTypeId;
+        instance.bracket = report.bracket;
+        instance.status = report.status;
+        instance.maxPerTeam = report.maxPerTeam;
+        instance.level = std::max(instance.level, report.level);
+        instance.lastSeen = now;
+        BgMember& member = instance.members[report.guid];
+        member = report;
+        member.lastSeen = now;
+        // a top-up bot that got in counts as a member from now on
+        instance.pending.erase(std::remove_if(instance.pending.begin(), instance.pending.end(),
+            [&report](BgFillBot const& b) { return b.guid == report.guid; }), instance.pending.end());
+    }
+    for (auto itr = _bgInstances.begin(); itr != _bgInstances.end();)
+    {
+        for (auto m = itr->second.members.begin(); m != itr->second.members.end();)
+            m = getMSTimeDiff(m->second.lastSeen, now) > 5000 ? itr->second.members.erase(m) : std::next(m);
+        if (itr->second.members.empty() && getMSTimeDiff(itr->second.lastSeen, now) > 5000)
+            itr = _bgInstances.erase(itr);
+        else
+            ++itr;
+    }
+    for (auto itr = _bgRoomMade.begin(); itr != _bgRoomMade.end();)
+        itr = getMSTimeDiff(itr->second, now) > 90000 ? _bgRoomMade.erase(itr) : std::next(itr);
+
+    // queued players: a place in a running battleground first, else the fill of a new one
+    std::set<std::pair<uint8, uint8>> waiting;              // queues with a player waiting
     for (BgReport const& report : reports)
     {
-        Battleground* bg = sBattlegroundMgr->GetBattlegroundTemplate(report.bgTypeId);
-        if (!bg)
+        waiting.insert(std::make_pair(report.queueType, report.bracket));
+        if (MakeRoomFor(report, now))
             continue;
-        PVPDifficultyEntry const* bracket = sDB2Manager.GetBattlegroundBracketByLevel(bg->GetMapId(), report.level);
-        if (!bracket)
-            continue;
-        BgFill& fill = _bgFills[std::make_pair(report.queueType, bracket->RangeIndex)];
-        if (!fill.firstSeen)
+        BgFill& fill = _bgFills[std::make_pair(report.queueType, report.bracket)];
+        if (!fill.firstSeen || fill.endedAt)
         {
+            fill = BgFill();
             fill.firstSeen = now;
             fill.queueType = report.queueType;
             fill.bgTypeId = report.bgTypeId;
             fill.level = report.level;
             fill.master = report.queuer;
-            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: %s queued (battleground %u, levels %u-%u); bots fill both teams in %u s.",
-                report.queuer.ToString().c_str(), uint32(report.bgTypeId), uint32(bracket->MinLevel), uint32(bracket->MaxLevel),
-                _bgFillDelay / 1000);
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: %s queued (battleground %u, bracket %u); bots fill both teams in %u s.",
+                report.queuer.ToString().c_str(), uint32(report.bgTypeId), uint32(report.bracket), _bgFillDelay / 1000);
         }
         BgFill::Queuer& queuer = fill.queuers[report.queuer];
         queuer.team = report.team;
+        queuer.role = report.role;
         queuer.partyBots = report.partyBots;
         queuer.lastSeen = now;
     }
@@ -1449,30 +1593,40 @@ void PlayerbotMgr::UpdateBgFill(std::vector<BgReport> const& reports, uint32 now
     {
         BgFill& fill = itr->second;
         for (auto queuer = fill.queuers.begin(); queuer != fill.queuers.end();)
-        {
-            if (getMSTimeDiff(queuer->second.lastSeen, now) > 5000)
-                queuer = fill.queuers.erase(queuer);
-            else
-                ++queuer;
-        }
+            queuer = getMSTimeDiff(queuer->second.lastSeen, now) > 5000 ? fill.queuers.erase(queuer) : std::next(queuer);
 
-        // nobody waits any more: the battleground started (or they left the queue)
+        BattlegroundQueue& queue = sBattlegroundMgr->GetBattlegroundQueue(fill.queueType);
+        auto queued = [&queue](ObjectGuid const& guid) { GroupQueueInfo info; return queue.GetPlayerGroupInfoData(guid, &info); };
+
+        // nobody waits any more (they got in, or left the queue): the bots still queued get 60 s to be invited into
+        // the battleground being filled, then leave
         if (fill.queuers.empty())
         {
-            for (BgFill::FillBot const& bot : fill.bots)
-                abandon(bot.guid);
-            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: nobody waits in queue %u any more (%u fill bot(s)).",
-                uint32(fill.queueType), uint32(fill.bots.size()));
-            itr = _bgFills.erase(itr);
+            if (!fill.endedAt)
+                fill.endedAt = now;
+            bool const expired = getMSTimeDiff(fill.endedAt, now) > 60000;
+            for (auto bot = fill.bots.begin(); bot != fill.bots.end();)
+            {
+                if (queued(bot->guid) && !expired)
+                {
+                    ++bot;
+                    continue;
+                }
+                if (queued(bot->guid))
+                    abandon(bot->guid);
+                bot = fill.bots.erase(bot);
+            }
+            if (fill.bots.empty())
+                itr = _bgFills.erase(itr);
+            else
+                ++itr;
             continue;
         }
 
         // a bot no longer in the queue (it got in, or the join failed) leaves the fill
-        BattlegroundQueue& queue = sBattlegroundMgr->GetBattlegroundQueue(fill.queueType);
         for (auto bot = fill.bots.begin(); bot != fill.bots.end();)
         {
-            GroupQueueInfo info;
-            if (queue.GetPlayerGroupInfoData(bot->guid, &info) || getMSTimeDiff(bot->started, now) < 10000)
+            if (queued(bot->guid) || getMSTimeDiff(bot->started, now) < 10000)
             {
                 ++bot;
                 continue;
@@ -1481,53 +1635,133 @@ void PlayerbotMgr::UpdateBgFill(std::vector<BgReport> const& reports, uint32 now
             bot = fill.bots.erase(bot);
         }
 
-        if (getMSTimeDiff(fill.firstSeen, now) < _bgFillDelay || int32(fill.nextJoin - now) > 0)
-        {
-            ++itr;
-            continue;
-        }
-
         Battleground* bg = sBattlegroundMgr->GetBattlegroundTemplate(fill.bgTypeId);
-        if (!bg)
+        if (!bg || getMSTimeDiff(fill.firstSeen, now) < _bgFillDelay || int32(fill.nextJoin - now) > 0)
         {
             ++itr;
             continue;
         }
         uint32 const maxPerTeam = std::max<uint32>(1, bg->GetMaxPlayersPerTeam());
-        uint32 perTeam = _bgBotsPerTeam ? _bgBotsPerTeam : bg->GetMinPlayersPerTeam();
-        perTeam = std::min(std::max<uint32>(perTeam, 1), maxPerTeam);
+        uint32 const perTeam = _bgBotsPerTeam ? std::min(_bgBotsPerTeam, maxPerTeam) : maxPerTeam;
 
-        int32 need[2] = { int32(perTeam), int32(perTeam) };    // [0] Alliance, [1] Horde
+        std::vector<uint8> roles[2];
         for (auto const& pair : fill.queuers)
-            need[pair.second.team == ALLIANCE ? 0 : 1] -= 1 + pair.second.partyBots;
-        for (BgFill::FillBot const& bot : fill.bots)
-            need[bot.team == ALLIANCE ? 0 : 1] -= 1;
+        {
+            roles[TeamIndex(pair.second.team)].push_back(pair.second.role);
+            for (uint8 i = 0; i < pair.second.partyBots; ++i)
+                roles[TeamIndex(pair.second.team)].push_back(ROLES_DPS);
+        }
+        for (BgFillBot const& bot : fill.bots)
+            roles[TeamIndex(bot.team)].push_back(bot.role);
 
-        // one bot per JoinInterval, to the team that lacks the most
-        int const side = need[0] >= need[1] ? 0 : 1;
-        if (need[side] > 0 && StartBgBot(fill, side == 0 ? ALLIANCE : HORDE, perTeam))
-            fill.nextJoin = now + _bgJoinInterval;
-        else if (need[1 - side] > 0 && StartBgBot(fill, side == 0 ? HORDE : ALLIANCE, perTeam))
-            fill.nextJoin = now + _bgJoinInterval;
+        // one bot per JoinInterval, to the team that lacks the most, its scarcest role first
+        int32 need[2][3];
+        RoleNeeds(perTeam, roles[0], need[0]);
+        RoleNeeds(perTeam, roles[1], need[1]);
+        int32 const total0 = std::max(0, need[0][0]) + std::max(0, need[0][1]) + std::max(0, need[0][2]);
+        int32 const total1 = std::max(0, need[1][0]) + std::max(0, need[1][1]) + std::max(0, need[1][2]);
+        for (int side : { total0 >= total1 ? 0 : 1, total0 >= total1 ? 1 : 0 })
+        {
+            bool started = false;
+            for (uint8 role : { uint8(ROLES_TANK), uint8(ROLES_HEALER), uint8(ROLES_DPS) })
+            {
+                if (need[side][role] <= 0)
+                    continue;
+                uint32 const team = side == 0 ? ALLIANCE : HORDE;
+                ObjectGuid const guid = StartBgBot(team, role, fill.level, fill.bgTypeId, fill.master, fill.warned);
+                if (guid.IsEmpty())
+                    continue;
+                BgFillBot fillBot;
+                fillBot.guid = guid;
+                fillBot.team = team;
+                fillBot.role = role;
+                fillBot.started = now;
+                fill.bots.push_back(fillBot);
+                started = true;
+                break;
+            }
+            if (started)
+            {
+                fill.nextJoin = now + _bgJoinInterval;
+                break;
+            }
+        }
         ++itr;
+    }
+
+    // top-up (owner's rule): a running battleground's team short of players for FillDelay with nobody waiting in its
+    // queue (a refused invitation, a bot or player gone) gets a bot of the missing role
+    for (auto& pair : _bgInstances)
+    {
+        BgInstance& instance = pair.second;
+        if (instance.status < STATUS_WAIT_JOIN || instance.status >= STATUS_WAIT_LEAVE || !instance.maxPerTeam ||
+            waiting.count(std::make_pair(instance.queueType, instance.bracket)) || int32(instance.nextJoin - now) > 0)
+            continue;
+        // a top-up bot not inside after 60 s leaves the queue (AbandonBattleground keeps it if it got in meanwhile)
+        for (auto bot = instance.pending.begin(); bot != instance.pending.end();)
+        {
+            if (getMSTimeDiff(bot->started, now) <= 60000)
+            {
+                ++bot;
+                continue;
+            }
+            abandon(bot->guid);
+            bot = instance.pending.erase(bot);
+        }
+        uint32 const perTeam = _bgBotsPerTeam ? std::min(_bgBotsPerTeam, instance.maxPerTeam) : instance.maxPerTeam;
+        std::vector<uint8> roles[2];
+        bool hasBots = false;
+        for (auto const& m : instance.members)
+        {
+            roles[TeamIndex(m.second.team)].push_back(m.second.role);
+            hasBots |= m.second.fillBot;
+        }
+        if (!hasBots)
+            continue;                                       // only battlegrounds the bots are filling
+        for (BgFillBot const& bot : instance.pending)
+            roles[TeamIndex(bot.team)].push_back(bot.role);
+        for (int side = 0; side < 2; ++side)
+        {
+            if (roles[side].size() >= perTeam)
+            {
+                instance.shortSince[side] = 0;
+                continue;
+            }
+            if (!instance.shortSince[side])
+                instance.shortSince[side] = now;
+            if (getMSTimeDiff(instance.shortSince[side], now) < _bgFillDelay)
+                continue;
+            int32 need[3];
+            RoleNeeds(perTeam, roles[side], need);
+            uint8 role = need[ROLES_TANK] > 0 ? ROLES_TANK : need[ROLES_HEALER] > 0 ? ROLES_HEALER : ROLES_DPS;
+            uint32 const team = side == 0 ? ALLIANCE : HORDE;
+            uint8 warned = 0;
+            ObjectGuid const guid = StartBgBot(team, role, instance.level, instance.bgTypeId, ObjectGuid::Empty, warned);
+            if (guid.IsEmpty())
+                continue;
+            BgFillBot bot;
+            bot.guid = guid;
+            bot.team = team;
+            bot.role = role;
+            bot.started = now;
+            instance.pending.push_back(bot);
+            instance.shortSince[side] = now;                // the next one, if still short, after another delay
+            instance.nextJoin = now + _bgJoinInterval;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: instance %u lacks a %s %s; a bot queues for it.",
+                pair.first, team == ALLIANCE ? "Alliance" : "Horde", RoleText(role));
+            break;
+        }
     }
 }
 
-bool PlayerbotMgr::StartBgBot(BgFill& fill, uint32 team, uint32 perTeam)
+ObjectGuid PlayerbotMgr::StartBgBot(uint32 team, uint8 role, uint8 level, uint16 bgTypeId, ObjectGuid const& master, uint8& warned)
 {
-    // about one healer in five
-    uint32 healers = 0;
-    for (BgFill::FillBot const& bot : fill.bots)
-        if (bot.team == team && bot.healer)
-            ++healers;
-    bool const wantHealer = healers < std::max<uint32>(1, perTeam / 5);
-
-    auto specsFor = [](uint8 cls, bool healer)
+    auto specsFor = [role](uint8 cls)
     {
         std::vector<uint32> specs;
         for (uint32 spec : BotFactory::SpecsOfClass(cls))
             if (ChrSpecializationEntry const* entry = sChrSpecializationStore.LookupEntry(spec))
-                if ((entry->Role == ROLES_HEALER) == healer)
+                if (entry->Role == role)
                     specs.push_back(spec);
         return specs;
     };
@@ -1535,12 +1769,10 @@ bool PlayerbotMgr::StartBgBot(BgFill& fill, uint32 team, uint32 perTeam)
     std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
     auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
 
-    // an idle logged-in pool bot of that faction, at most the fill's level, picked at random; a healer class first
-    // while healers are wanted
+    // an idle logged-in pool bot of that faction, at most that level, whose class has a spec of the role; at random
     ObjectGuid bestGuid;
     Bot* best = nullptr;
     CharacterInfo const* bestInfo = nullptr;
-    bool bestHeals = false;
     uint32 seen = 0;
     for (auto& pair : _bots)
     {
@@ -1550,72 +1782,50 @@ bool PlayerbotMgr::StartBgBot(BgFill& fill, uint32 team, uint32 perTeam)
         if (bot.restUntil && int32(bot.restUntil - getMSTime()) > 0)
             continue;
         CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);
-        if (!info || Player::TeamForRace(info->Race) != team || info->Level > fill.level)
+        if (!info || Player::TeamForRace(info->Race) != team || info->Level > level || specsFor(info->Class).empty() ||
+            urand(0, seen++) != 0)
             continue;
-        bool const heals = wantHealer && !specsFor(info->Class, true).empty();
-        if (bestInfo && bestHeals && !heals)
-            continue;
-        if (bestInfo && bestHeals == heals && urand(0, seen) != 0)
-        {
-            ++seen;
-            continue;
-        }
-        seen = bestHeals == heals ? seen + 1 : 1;
         best = &bot;
         bestGuid = pair.first;
         bestInfo = info;
-        bestHeals = heals;
     }
 
-    uint8 const teamBit = team == ALLIANCE ? 1 : 2;
+    uint8 const bit = uint8((team == ALLIANCE ? 1 : 8) << role);
     if (!best)
     {
-        if (!(fill.warned & teamBit))
+        if (!(warned & bit))
         {
-            fill.warned |= teamBit;
-            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: no idle %s pool bot of level %u or less for queue %u.",
-                team == ALLIANCE ? "Alliance" : "Horde", uint32(fill.level), uint32(fill.queueType));
+            warned |= bit;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: no idle %s pool bot of level %u or less can be a %s.",
+                team == ALLIANCE ? "Alliance" : "Horde", uint32(level), RoleText(role));
         }
-        return false;
+        return ObjectGuid::Empty;
     }
 
-    std::vector<uint32> specs = specsFor(bestInfo->Class, bestHeals);
-    if (specs.empty())
-        specs = BotFactory::SpecsOfClass(bestInfo->Class);
-    if (specs.empty())
-        return false;
-
+    std::vector<uint32> const specs = specsFor(bestInfo->Class);
     BotFactory::CreateRequest request;
     request.cls = bestInfo->Class;
     request.specId = specs[urand(0, specs.size() - 1)];
-    request.level = fill.level;
+    request.level = level;
     request.team = team;
-    request.creator = fill.master;
+    request.creator = master;
     request.teleport = false;                               // the battleground takes it there
 
-    best->notifyGuid = fill.master;
+    best->notifyGuid = master;
     best->toGMIsland = false;
     best->ownerGoneTimer = -1;
-    std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(fill.master, best->session->GetAccountId(), true);
+    std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(master, best->session->GetAccountId(), true);
     {
         std::lock_guard<std::mutex> lock(_aiLock);
         _ais[bestGuid] = ai;
     }
-    uint16 const bgTypeId = fill.bgTypeId;
     ObjectAccessor::PostToPlayer(bestGuid, [ai, request, bgTypeId](Player* p) -> void
     {
         ai->JoinBattlegroundFor(p, request, bgTypeId);
     });
-
-    BgFill::FillBot fillBot;
-    fillBot.guid = bestGuid;
-    fillBot.team = team;
-    fillBot.healer = bestHeals;
-    fillBot.started = getMSTime();
-    fill.bots.push_back(fillBot);
-    TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: bot '%s' fills the %s team of queue %u%s.", best->name.c_str(),
-        team == ALLIANCE ? "Alliance" : "Horde", uint32(fill.queueType), bestHeals ? " as a healer" : "");
-    return true;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Battleground: bot '%s' queues for battleground %u as an %s %s.", best->name.c_str(),
+        uint32(bgTypeId), team == ALLIANCE ? "Alliance" : "Horde", RoleText(role));
+    return bestGuid;
 }
 
 void PlayerbotMgr::Shutdown()
