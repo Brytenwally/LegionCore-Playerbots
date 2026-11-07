@@ -65,6 +65,9 @@ public:
     // the fill was not needed any more (the queuer left the queue): leave the queue if still in it, alone
     // (not grouped yet); true when the bot is free again (no group), so the manager may release it
     bool AbandonLfg(Player* bot);
+    // a dungeon finder group short of members (PlayerbotMgr::UpdateReplaceFill): set up to the leader's level in a spec
+    // of the missing role, invited by the leader, then teleported to him once in the group
+    void JoinDungeonGroupFor(Player* bot, BotFactory::CreateRequest const& request, uint8 role);
     // Battleground fill (PlayerbotMgr::UpdateBgFill): a pool bot set up to the fill's level, then queued alone for
     // that battleground (bgTypeId, the random one included). Once its battleground is over it is dismissed.
     void JoinBattlegroundFor(Player* bot, BotFactory::CreateRequest const& request, uint16 bgTypeId);
@@ -257,6 +260,9 @@ private:
     uint32 _inviteAccount = 0;
     uint32 _inviteTimer = 0;
     void SendCreatorInvite(Player* bot);
+    bool _joinTeleport = false;                             // in its master's group: teleport to him (dungeon replacement)
+    uint8 _joinRole = 0;                                    // ... with this dungeon finder role
+    void UpdateJoinTeleport(Player* bot);
     BotCombat::SpellThrottle _throttle;
     BotCombat::EngageTimer _engageTimer;
     std::map<size_t, std::string> _lastSkip;                // rotation step -> last logged skip reason (log level 2)

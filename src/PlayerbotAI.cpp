@@ -144,6 +144,8 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     }
 
     HandleGroupInvite(bot);
+    if (_joinTeleport)
+        UpdateJoinTeleport(bot);
     CheckOwnerGroup(bot, diff);
     CheckPlayerlessGroup(bot, diff);
 
@@ -2237,6 +2239,49 @@ bool PlayerbotAI::AbandonBattleground(Player* bot)
     }
     _bgFill = false;
     return true;
+}
+
+void PlayerbotAI::JoinDungeonGroupFor(Player* bot, BotFactory::CreateRequest const& request, uint8 role)
+{
+    std::string const summary = BotFactory::InitializeNewBot(bot, request);
+    if (bot->GetGroup())
+    {
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' is in a group: it cannot join a dungeon group.", bot->GetName());
+        return;
+    }
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' waits for the invite of its dungeon group as %s: %s", bot->GetName(),
+        LfgRoleName(role), summary.c_str());
+    // the leader's session invites it as a client would (SendCreatorInvite); HandleGroupInvite accepts its master
+    _inviteCreator = request.creator;
+    _inviteAccount = request.creatorAccount;
+    _inviteTimer = 1000;
+    _joinTeleport = true;
+    _joinRole = role;
+}
+
+void PlayerbotAI::UpdateJoinTeleport(Player* bot)
+{
+    Group* group = bot->GetGroup();
+    if (!group || !group->IsMember(_master))
+        return;
+    _joinTeleport = false;
+    if (_joinRole)
+        group->SetLfgRoles(bot->GetGUID(), _joinRole);
+
+    // where its master stands (another map: read under the accessor lock), inside the group's dungeon
+    bool found = false;
+    uint32 mapId = 0;
+    Position pos;
+    ObjectAccessor::WithPlayer(_master, [&](Player* master)
+    {
+        found = true;
+        mapId = master->GetMapId();
+        pos = master->GetPosition();
+    });
+    if (!found)
+        return;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' joined its dungeon group: teleports to its leader (map %u).", bot->GetName(), mapId);
+    bot->TeleportTo(mapId, pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), pos.GetOrientation());
 }
 
 bool PlayerbotAI::AbandonLfg(Player* bot)

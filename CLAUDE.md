@@ -594,6 +594,23 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
     every member on entering) even for a replacement request; fixed in the core (commit "Let dungeon finder groups
     requeue for a replacement", see its `CLAUDE.md`). `BotFactory::ResetBot` now removes that cooldown too, or a
     dismissed bot's next fill (within 30 min) would be refused as `LFG_JOIN_RANDOM_COOLDOWN`.
+  - **Replacement by invite** (owner, build #31: after a kick the group still did not requeue on its own, only after
+    he teleported out and back in; then the fill bot queued but never got into the dungeon, while a bot he invited by
+    hand teleported in at once). The server log had no proposal answer from the fill bot and dropped it from the
+    queue 34 s later, so the core's replacement matching is still unexplained (no `lfg` debug log to tell). The
+    module no longer uses the replacement queue: `ReportDungeonGroup` (the leader's thread, every 2 s: he is a client,
+    leads a dungeon finder group inside its dungeon, its state is `DUNGEON` or `QUEUED`, fewer members than the
+    dungeon's role counts) -> `UpdateReplaceFill` (one fill per group; after `Playerbots.LFG.FillDelay`, one bot per
+    `JoinInterval` for a missing role, roles from `Group::GetLfgRoles`) -> `StartReplaceBot` (an idle pool bot at
+    random) -> `JoinDungeonGroupFor` on the bot's thread: set up to his level in a spec of that role, then his session
+    invites it (`SendCreatorInvite`, 1 s), the bot accepts its master's invite, and once in the group
+    `UpdateJoinTeleport` sets its LFG role and teleports it to him (read with `WithPlayer`): the path that worked by
+    hand. Joining a group still queued makes the core leave the queue (`OnAddMember`). A bot not in the group after
+    30 s, or when the fill ends, is dismissed. Dungeon finder groups are no longer reported to the queue fill.
+  - **Random pool bots** (owner, build #31: a level 16 group always got allied races): every pick (dungeon finder fill
+    and replacement, battleground fill, `.playerbots create` reuse) took the highest-level eligible bot, and pool bots
+    sit at their starting level (1, allied races 10, DK 55, DH 98). Now a uniform random pick among the eligible
+    (`urand(0, seen++) == 0`); the battleground fill still prefers healer classes while healers are wanted.
   - **Vote kicks** (owner, 2026-11-06): when a player's vote to kick a **bot** is running (victim is a bot, a
     non-bot member has voted yes: the kicker votes yes on his own), every other bot of the group votes yes
     (`UpdateLfg`, core accessor `LFGMgr::GetPendingBoot`, vote by `UpdateBoot`; log `votes yes to kick`). Kicks of
@@ -833,6 +850,11 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   finder group`), bots vote yes to kick a bot, the kicked random bot is dismissed; fill, combat, SimC rotations and
   looting as before. **Problem**: the group still could not queue for a replacement, neither by the offer nor by
   hand (core: random dungeon cooldown, fixed in the commit after).
+- 2026-11-07, owner's test of build #31 (core with the upstream merge, the dungeon finder cooldown fix and
+  battlegrounds): **dungeon finder replacement still fails**: after a kick nothing requeues until the player teleports
+  out and in; the fill bot then queues but never enters; a bot invited by hand teleports in. Pool bots were almost
+  always allied races. Both changed in the commit after (replacement by invite, random picks). Battlegrounds not
+  reported yet.
 
 ## Checking
 

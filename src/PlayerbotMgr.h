@@ -223,6 +223,37 @@ private:
         std::vector<FillBot> bots;
         uint8 warned = 0;                                   // 1 Alliance, 2 Horde: "no idle pool bot" logged
     };
+    // Dungeon finder groups short of members (owner, builds #28-#31: after a kick or a leave the core's replacement
+    // queue never matched the group with a bot, though a player's invite brought one in at once): the group's leader,
+    // a player inside the dungeon, is reported; after Playerbots.LFG.FillDelay he invites an idle pool bot of a
+    // missing role (his session sends the invite), and the bot teleports to him once in the group.
+    struct ReplaceReport
+    {
+        ObjectGuid leader;
+        uint32 leaderAccount = 0;
+        ObjectGuid group;
+        uint32 dungeonId = 0;
+        uint8 level = 0;
+        uint32 team = 0;
+        uint8 members = 0;
+        uint8 tanks = 0;
+        uint8 healers = 0;
+        uint8 dps = 0;
+    };
+    struct ReplaceFill
+    {
+        ReplaceReport report;
+        uint32 firstSeen = 0;
+        uint32 lastSeen = 0;
+        uint32 nextJoin = 0;
+        std::vector<LfgFill::FillBot> bots;                 // invited, not in the group yet
+        uint8 warned = 0;
+    };
+    void ReportDungeonGroup(Player* player);
+    void UpdateReplaceFill(std::vector<ReplaceReport> const& reports, uint32 now);
+    bool StartReplaceBot(ReplaceFill& fill, uint8 role);
+    std::vector<ReplaceReport> _replaceReports;             // _lfgLock
+    std::map<ObjectGuid, ReplaceFill> _replaceFills;        // by group; world thread only
     void ReportBgQueues(Player* player);
     void UpdateBgFill(std::vector<BgReport> const& reports, uint32 now);
     bool StartBgBot(BgFill& fill, uint32 team, uint32 perTeam);

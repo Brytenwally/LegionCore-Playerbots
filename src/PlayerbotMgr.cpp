@@ -13,6 +13,7 @@
 #include "DB2Stores.h"
 #include "GlobalFunctional.h"
 #include "Group.h"
+#include "GroupMgr.h"
 #include "LFGMgr.h"
 #include "Timer.h"
 #include "Log.h"
@@ -352,21 +353,21 @@ bool PlayerbotMgr::ReuseBot(BotFactory::CreateRequest const& request)
         return cls == request.cls && Player::TeamForRace(race) == request.team && level <= request.level;
     };
 
-    // a logged-in bot of a bot account that nobody leads (the startup pool), the highest level first
+    // a logged-in bot of a bot account that nobody leads (the startup pool), picked at random (owner, build #31: by
+    // highest level, the level 10 allied races always won over the level 1 pool bots)
     ObjectGuid bestGuid;
     Bot* best = nullptr;
-    uint8 bestLevel = 0;
+    uint32 seen = 0;
     for (auto& pair : _bots)
     {
         Bot& bot = pair.second;
         if (bot.removing || !bot.inWorld || !bot.notifyGuid.IsEmpty() || bot.init || !onBotAccount(bot.session->GetAccountId()))
             continue;
         CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);   // no touching the player off its thread
-        if (!info || !fits(info->Race, info->Class, info->Level) || (best && info->Level <= bestLevel))
+        if (!info || !fits(info->Race, info->Class, info->Level) || urand(0, seen++) != 0)
             continue;
         best = &bot;
         bestGuid = pair.first;
-        bestLevel = info->Level;
     }
 
     if (best)
@@ -839,14 +840,16 @@ void PlayerbotMgr::OnClientUpdate(Player* player, uint32 diff)
 
     if (_bgFillEnabled)
         ReportBgQueues(player);
+    if (_lfgFillEnabled)
+        ReportDungeonGroup(player);
 
     if (!_lfgFillEnabled || !sLFGMgr->HasQueue(guid))
         return;
 
-    // a party's queue is its leader's; a dungeon finder group queueing again for a replacement (a member kicked
-    // or gone; its leader may be a bot) is reported by its players, one fill per group (owner, build #26)
+    // a party's queue is its leader's; a dungeon finder group short of members is filled by invites instead
+    // (ReportDungeonGroup): its replacement queue never matched a bot (builds #28-#31)
     Group* group = player->GetGroup();
-    if (group && !group->isLFGGroup() && group->GetLeaderGUID() != guid)
+    if (group && (group->isLFGGroup() || group->GetLeaderGUID() != guid))
         return;
 
     std::vector<ObjectGuid> members;
@@ -931,11 +934,13 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
 
     std::vector<QueueReport> reports;
     std::vector<BgReport> bgReports;
+    std::vector<ReplaceReport> replaceReports;
     std::vector<ObjectGuid> releases;
     {
         std::lock_guard<std::mutex> lock(_lfgLock);
         reports.swap(_queueReports);
         bgReports.swap(_bgReports);
+        replaceReports.swap(_replaceReports);
         releases.swap(_releaseRequests);
     }
     for (ObjectGuid const& guid : releases)
@@ -943,6 +948,7 @@ void PlayerbotMgr::UpdateLfgFill(uint32 diff)
 
     uint32 const now = getMSTime();
     UpdateBgFill(bgReports, now);
+    UpdateReplaceFill(replaceReports, now);
     for (QueueReport const& report : reports)
     {
         auto const fillKey = std::make_pair(report.key, report.queueId);
@@ -1073,11 +1079,12 @@ bool PlayerbotMgr::StartLfgBot(LfgFill& fill, uint8 role)
     std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
     auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
 
-    // an idle logged-in pool bot of his faction, at most his level, whose class has a spec of that role;
-    // the highest level first
+    // an idle logged-in pool bot of his faction, at most his level, whose class has a spec of that role; picked at
+    // random (owner, build #31: by highest level, the level 10 allied races always won)
     ObjectGuid bestGuid;
     Bot* best = nullptr;
     CharacterInfo const* bestInfo = nullptr;
+    uint32 seen = 0;
     for (auto& pair : _bots)
     {
         Bot& bot = pair.second;
@@ -1088,7 +1095,7 @@ bool PlayerbotMgr::StartLfgBot(LfgFill& fill, uint8 role)
             continue;
         CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);
         if (!info || Player::TeamForRace(info->Race) != fill.report.team || info->Level > fill.report.level ||
-            (bestInfo && info->Level <= bestInfo->Level) || specsFor(info->Class).empty())
+            specsFor(info->Class).empty() || urand(0, seen++) != 0)
             continue;
         best = &bot;
         bestGuid = pair.first;
@@ -1138,6 +1145,227 @@ bool PlayerbotMgr::StartLfgBot(LfgFill& fill, uint8 role)
     TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: bot '%s' fills a %s for %s.", best->name.c_str(),
         role == lfg::PLAYER_ROLE_TANK ? "tank" : role == lfg::PLAYER_ROLE_HEALER ? "healer" : "dps",
         fill.report.queuer.ToString().c_str());
+    return true;
+}
+
+// ---- Dungeon finder groups short of members (2026-11-07) ------------------------------------------------
+
+// the client's thread, every 2 s: he leads a dungeon finder group, inside its dungeon, with an empty place
+void PlayerbotMgr::ReportDungeonGroup(Player* player)
+{
+    Group* group = player->GetGroup();
+    if (!group || !group->isLFGGroup() || group->GetLeaderGUID() != player->GetGUID() || !player->GetMap()->IsDungeon())
+        return;
+    ObjectGuid const gguid = group->GetGUID();
+    uint32 const queueId = sLFGMgr->GetQueueId(gguid);
+    lfg::LfgState const state = sLFGMgr->GetState(gguid, queueId);
+    // in the dungeon, or queued again for a replacement; not finished, not during a kick vote or a proposal
+    if (state != lfg::LFG_STATE_DUNGEON && state != lfg::LFG_STATE_QUEUED)
+        return;
+    uint32 const dungeonId = sLFGMgr->GetDungeon(gguid);
+    lfg::LFGDungeonData const* dungeon = sLFGMgr->GetLFGDungeon(dungeonId);
+    if (!dungeon || !dungeon->dbc || dungeon->dbc->Substruct != LFG_QUEUE_DUNGEON)
+        return;
+
+    ReplaceReport report;
+    report.leader = player->GetGUID();
+    report.leaderAccount = player->GetSession()->GetAccountId();
+    report.group = gguid;
+    report.dungeonId = dungeonId;
+    report.level = player->getLevel();
+    report.team = player->GetTeam();
+    for (Group::MemberSlot const& slot : group->GetMemberSlots())
+    {
+        ++report.members;
+        uint8 const roles = group->GetLfgRoles(slot.Guid);
+        if (roles & lfg::PLAYER_ROLE_TANK)
+            ++report.tanks;
+        else if (roles & lfg::PLAYER_ROLE_HEALER)
+            ++report.healers;
+        else
+            ++report.dps;
+    }
+    uint32 const size = std::max<uint32>(dungeon->dbc->CountTank + dungeon->dbc->CountHealer + dungeon->dbc->CountDamage, 5);
+    if (report.members >= size)
+        return;
+    std::lock_guard<std::mutex> lock(_lfgLock);
+    _replaceReports.push_back(report);
+}
+
+void PlayerbotMgr::UpdateReplaceFill(std::vector<ReplaceReport> const& reports, uint32 now)
+{
+    for (ReplaceReport const& report : reports)
+    {
+        ReplaceFill& fill = _replaceFills[report.group];
+        if (!fill.firstSeen)
+        {
+            fill.firstSeen = now;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: the group of %s has %u member(s); bots join it in %u s.",
+                report.leader.ToString().c_str(), uint32(report.members), _lfgFillDelay / 1000);
+        }
+        fill.report = report;
+        fill.lastSeen = now;
+    }
+
+    // an invited bot that is not in the group (the invite failed, or the group is gone) goes back to GM Island
+    auto release = [](ObjectGuid const& guid)
+    {
+        std::shared_ptr<PlayerbotAI> ai = sPlayerbotMgr->GetAI(guid);
+        if (!ai)
+            return;
+        ObjectAccessor::PostToPlayer(guid, [ai](Player* bot) -> void
+        {
+            if (!bot->GetGroup())
+                ai->Dismiss(bot, "it did not get into the dungeon group");
+        });
+    };
+
+    for (auto itr = _replaceFills.begin(); itr != _replaceFills.end();)
+    {
+        ReplaceFill& fill = itr->second;
+        Group* group = sGroupMgr->GetGroupByGUID(itr->first);
+
+        // no report for a while: the group is full, gone, finished, or its leader left the dungeon
+        if (getMSTimeDiff(fill.lastSeen, now) > 5000 || !group)
+        {
+            for (LfgFill::FillBot const& bot : fill.bots)
+                if (!group || !group->IsMember(bot.guid))
+                    release(bot.guid);
+            itr = _replaceFills.erase(itr);
+            continue;
+        }
+
+        // bots that made it count in the report from now on; one not in after 30 s is given up
+        for (auto bot = fill.bots.begin(); bot != fill.bots.end();)
+        {
+            if (group->IsMember(bot->guid))
+                bot = fill.bots.erase(bot);
+            else if (getMSTimeDiff(bot->started, now) > 30000)
+            {
+                release(bot->guid);
+                bot = fill.bots.erase(bot);
+            }
+            else
+                ++bot;
+        }
+
+        if (getMSTimeDiff(fill.firstSeen, now) < _lfgFillDelay || int32(fill.nextJoin - now) > 0)
+        {
+            ++itr;
+            continue;
+        }
+
+        lfg::LFGDungeonData const* dungeon = sLFGMgr->GetLFGDungeon(fill.report.dungeonId);
+        int32 tanks = dungeon && dungeon->dbc ? dungeon->dbc->CountTank : 1;
+        int32 healers = dungeon && dungeon->dbc ? dungeon->dbc->CountHealer : 1;
+        int32 dps = dungeon && dungeon->dbc ? dungeon->dbc->CountDamage : 3;
+        if (!tanks && !healers && !dps)
+        {
+            tanks = 1;
+            healers = 1;
+            dps = 3;
+        }
+        tanks -= fill.report.tanks;
+        healers -= fill.report.healers;
+        dps -= fill.report.dps;
+        for (LfgFill::FillBot const& bot : fill.bots)
+        {
+            if (bot.role & lfg::PLAYER_ROLE_TANK)
+                --tanks;
+            else if (bot.role & lfg::PLAYER_ROLE_HEALER)
+                --healers;
+            else
+                --dps;
+        }
+        int32 const free = 5 - int32(fill.report.members) - int32(fill.bots.size());
+        if (free > 0)
+            for (uint8 role : { uint8(lfg::PLAYER_ROLE_TANK), uint8(lfg::PLAYER_ROLE_HEALER), uint8(lfg::PLAYER_ROLE_DAMAGE) })
+            {
+                int32 const need = role == lfg::PLAYER_ROLE_TANK ? tanks : role == lfg::PLAYER_ROLE_HEALER ? healers : dps;
+                if (need > 0 && StartReplaceBot(fill, role))
+                {
+                    fill.nextJoin = now + _lfgJoinInterval;
+                    break;
+                }
+            }
+        ++itr;
+    }
+}
+
+bool PlayerbotMgr::StartReplaceBot(ReplaceFill& fill, uint8 role)
+{
+    uint8 const specRole = role == lfg::PLAYER_ROLE_TANK ? ROLES_TANK : role == lfg::PLAYER_ROLE_HEALER ? ROLES_HEALER : ROLES_DPS;
+    auto specsFor = [specRole](uint8 cls)
+    {
+        std::vector<uint32> specs;
+        for (uint32 spec : BotFactory::SpecsOfClass(cls))
+            if (ChrSpecializationEntry const* entry = sChrSpecializationStore.LookupEntry(spec))
+                if (entry->Role == specRole)
+                    specs.push_back(spec);
+        return specs;
+    };
+
+    std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
+    auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
+
+    // an idle logged-in pool bot of his faction, at most his level, with a spec of that role, at random
+    ObjectGuid bestGuid;
+    Bot* best = nullptr;
+    CharacterInfo const* bestInfo = nullptr;
+    uint32 seen = 0;
+    for (auto& pair : _bots)
+    {
+        Bot& bot = pair.second;
+        if (bot.removing || !bot.inWorld || !bot.notifyGuid.IsEmpty() || bot.init || !onBotAccount(bot.session->GetAccountId()))
+            continue;
+        if (bot.restUntil && int32(bot.restUntil - getMSTime()) > 0)    // e.g. just kicked from this group
+            continue;
+        CharacterInfo const* info = sWorld->GetCharacterInfo(pair.first);
+        if (!info || Player::TeamForRace(info->Race) != fill.report.team || info->Level > fill.report.level ||
+            specsFor(info->Class).empty() || urand(0, seen++) != 0)
+            continue;
+        best = &bot;
+        bestGuid = pair.first;
+        bestInfo = info;
+    }
+    if (!best)
+    {
+        if (!(fill.warned & role))
+        {
+            fill.warned |= role;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: no idle pool bot can join the group of %s as %s.",
+                fill.report.leader.ToString().c_str(), role == lfg::PLAYER_ROLE_TANK ? "tank" : role == lfg::PLAYER_ROLE_HEALER ? "healer" : "dps");
+        }
+        return false;
+    }
+
+    std::vector<uint32> const specs = specsFor(bestInfo->Class);
+    BotFactory::CreateRequest request;
+    request.cls = bestInfo->Class;
+    request.specId = specs[urand(0, specs.size() - 1)];
+    request.level = fill.report.level;
+    request.team = fill.report.team;
+    request.creator = fill.report.leader;
+    request.creatorAccount = fill.report.leaderAccount;
+    request.teleport = false;                               // to him once it is in the group (the dungeon is the group's)
+
+    best->notifyGuid = fill.report.leader;
+    best->toGMIsland = false;
+    best->ownerGoneTimer = -1;
+    std::shared_ptr<PlayerbotAI> ai = std::make_shared<PlayerbotAI>(fill.report.leader, best->session->GetAccountId(), true);
+    {
+        std::lock_guard<std::mutex> lock(_aiLock);
+        _ais[bestGuid] = ai;
+    }
+    ObjectAccessor::PostToPlayer(bestGuid, [ai, request, role](Player* p) -> void { ai->JoinDungeonGroupFor(p, request, role); });
+
+    LfgFill::FillBot fillBot;
+    fillBot.guid = bestGuid;
+    fillBot.role = role;
+    fillBot.started = getMSTime();
+    fill.bots.push_back(fillBot);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Dungeon finder: bot '%s' joins the group of %s as %s.", best->name.c_str(),
+        fill.report.leader.ToString().c_str(), role == lfg::PLAYER_ROLE_TANK ? "tank" : role == lfg::PLAYER_ROLE_HEALER ? "healer" : "dps");
     return true;
 }
 
@@ -1307,12 +1535,13 @@ bool PlayerbotMgr::StartBgBot(BgFill& fill, uint32 team, uint32 perTeam)
     std::vector<uint32> const accounts = BotFactory::BotAccountIds(_createConfig);
     auto onBotAccount = [&accounts](uint32 id) { return std::find(accounts.begin(), accounts.end(), id) != accounts.end(); };
 
-    // an idle logged-in pool bot of that faction, at most the fill's level; the highest level first, a healer class
-    // first while healers are wanted
+    // an idle logged-in pool bot of that faction, at most the fill's level, picked at random; a healer class first
+    // while healers are wanted
     ObjectGuid bestGuid;
     Bot* best = nullptr;
     CharacterInfo const* bestInfo = nullptr;
     bool bestHeals = false;
+    uint32 seen = 0;
     for (auto& pair : _bots)
     {
         Bot& bot = pair.second;
@@ -1324,8 +1553,14 @@ bool PlayerbotMgr::StartBgBot(BgFill& fill, uint32 team, uint32 perTeam)
         if (!info || Player::TeamForRace(info->Race) != team || info->Level > fill.level)
             continue;
         bool const heals = wantHealer && !specsFor(info->Class, true).empty();
-        if (bestInfo && (bestHeals > heals || (bestHeals == heals && info->Level <= bestInfo->Level)))
+        if (bestInfo && bestHeals && !heals)
             continue;
+        if (bestInfo && bestHeals == heals && urand(0, seen) != 0)
+        {
+            ++seen;
+            continue;
+        }
+        seen = bestHeals == heals ? seen + 1 : 1;
         best = &bot;
         bestGuid = pair.first;
         bestInfo = info;
