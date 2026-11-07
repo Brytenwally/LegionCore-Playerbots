@@ -936,6 +936,11 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   out and in; the fill bot then queues but never enters; a bot invited by hand teleports in. Pool bots were almost
   always allied races. Both changed in the commit after (replacement by invite, random picks). Battlegrounds not
   reported yet.
+- 2026-11-07, owner's test of build #32 (dungeon finder replacement by invite, random pool picks, battleground fill to
+  capacity with the role mix, guarded movement and waypoint routes): **works**: the dungeon finder fills a group short
+  of a member as described, pool bot races are mixed, the battleground fill is correct. Movement: **better than
+  build #31, still not right**: some bots still climb walls, and walking the waypoints looks robotic; the owner keeps
+  it as is for now (to improve later: smoother routes, the remaining wall climbs).
 
 ## Checking
 
