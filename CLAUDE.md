@@ -25,6 +25,13 @@ this module behaves, write it here **in the same commit as the fix**, without be
 went wrong, the evidence that found it (log lines, data), and the rule that follows for future
 code. Record each runtime test result the owner reports under "Status".
 
+## Keep README.md current (owner's rule, 2026-11-07)
+
+`README.md` has a **comparison with AzerothCore playerbots** (Verified / Built, waiting for the test / Missing) and a
+roadmap toward a 1:1 feature set. Update it in the same commit whenever a feature is added (Missing -> Built), the owner
+reports a test result (Built -> Verified, or back with the problem), or the plan changes; bump its "Status as of" line
+with the date and build.
+
 ## Owner's priority
 
 Random bots' open-world activity (questing on their own, level-appropriate zones, grinding,
