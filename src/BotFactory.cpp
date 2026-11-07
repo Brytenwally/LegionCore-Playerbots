@@ -6,6 +6,7 @@
 #include "AccountMgr.h"
 #include "BotApl.h"
 #include "BotGear.h"
+#include "BotMaintenance.h"
 #include "BotTalents.h"
 #include "CharacterData.h"
 #include "CharacterPackets.h"
@@ -658,6 +659,10 @@ namespace BotFactory
         BotGear::Result const gear = BotGear::AutoGear(bot, options);
         uint32 const gearDone = getMSTime();
 
+        // owner's rule (2026-11-07): random bots always have the riding of their level and a mount of it
+        BotMaintenance::Result riding;
+        BotMaintenance::LearnRiding(bot, riding);
+
         bot->SetFullHealth();
         for (uint8 i = 0; i < MAX_POWERS; ++i)
             if (bot->GetMaxPower(Powers(i)) > 0 && (i == POWER_MANA || i == POWER_ENERGY || i == POWER_FOCUS))
@@ -697,6 +702,7 @@ namespace BotFactory
         uint8 const startLevel = StartLevelFor(bot->getRace(), bot->getClass());
         if (bot->getLevel() != startLevel)
             bot->GiveLevel(startLevel);
+        BotMaintenance::ForgetRiding(bot);                  // back to its starting level: no riding above it
         bot->SetUInt32Value(PLAYER_FIELD_XP, 0);
         bot->SetFullHealth();
 

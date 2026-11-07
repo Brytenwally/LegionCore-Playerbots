@@ -53,6 +53,9 @@ namespace BotGear
     // the highest item level the bot may wear by its level and Options (0 = none)
     uint32 ItemLevelCap(uint8 level, Options const& options);
 
+    // weight of one point of an item stat (ItemModType) for the bot's current spec (0 for an unknown spec / stat);
+    // the same weights as ItemScore (enchants and gems, BotMaintenance)
+    float StatWeight(Player const* bot, int32 itemMod);
     // value of the item for the bot's current spec at itemLevel (0 for an unknown spec)
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel);
 

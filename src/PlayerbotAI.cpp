@@ -23,6 +23,7 @@
 #include "BotRotations.h"
 #include "BotFactory.h"
 #include "BotGear.h"
+#include "BotMaintenance.h"
 #include "BotConsumables.h"
 #include "BotFormation.h"
 #include "Chat.h"
@@ -274,8 +275,55 @@ void PlayerbotAI::HandleGroupInvite(Player* bot)
         accept ? "accepts" : "declines", leader.ToString().c_str());
 }
 
+// Owner's rule (2026-11-07): a bot in a party mounts when its leader mounts (a flier when he flies and its riding allows,
+// else a ground mount) and dismounts when he dismounts or a fight starts; only outdoors, with a mount and riding
+void PlayerbotAI::UpdateMount(Player* bot)
+{
+    bool const mounted = bot->HasAuraType(SPELL_AURA_MOUNTED);
+    if (_selfBot || !bot->IsAlive())
+        return;
+    if (_engaged || _groupInFight || bot->isInCombat())
+    {
+        if (mounted)
+            bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+        return;
+    }
+    Group* group = bot->GetGroup();
+    if (!group || bot->InBattleground() || bot->InArena())
+        return;
+    ObjectGuid leaderGuid = group->GetLeaderGUID();
+    if (!_master.IsEmpty() && group->IsMember(_master))
+        leaderGuid = _master;
+    if (leaderGuid == bot->GetGUID())
+        return;
+    Player* leader = ObjectAccessor::GetPlayer(*bot, leaderGuid);
+    if (!leader || !leader->IsInWorld())
+        return;
+
+    if (!leader->HasAuraType(SPELL_AURA_MOUNTED))
+    {
+        if (mounted)
+            bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
+        return;
+    }
+    if (mounted || bot->IsNonMeleeSpellCast(false) || _resting || !_lootTarget.IsEmpty())
+        return;
+    if (bot->IsInWater() || !bot->GetMap()->IsOutdoors(bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ()))
+        return;
+    bool const flying = leader->IsFlying() || leader->HasAuraType(SPELL_AURA_FLY);
+    uint32 const spell = BotMaintenance::MountSpellFor(bot, flying);
+    if (!spell)
+        return;
+    // the mount has a cast time: stand still for it (BotCast's rule: no moving flags before a cast)
+    bot->StopMoving();
+    bot->RemoveUnitMovementFlag(MOVEMENTFLAG_MASK_MOVING);
+    bot->CastSpell(bot, spell, false);
+}
+
 void PlayerbotAI::UpdateFollow(Player* bot)
 {
+    UpdateMount(bot);
+
     // combat owns the movement while engaged (or a healer walks to its heal target); moving would also
     // break a cast; a resting bot stays seated (UpdateRest stands it up when its leader walks off)
     if (_engaged || _resting || !_healMoveGuid.IsEmpty() || !_lootTarget.IsEmpty() || bot->IsNonMeleeSpellCast(false))
@@ -379,7 +427,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, maintenance, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -442,6 +490,16 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "autogear")
     {
         AutoGearOrder(bot, sender);
+        return true;
+    }
+
+    if (order == "maintenance")
+    {
+        // an order, so it may change an alt (owner's alt rule); an alt's enchants are only added, never replaced
+        if (bot->isInCombat())
+            Say(bot, sender.guid, "Not in combat.");
+        else
+            Say(bot, sender.guid, BotMaintenance::Maintain(bot, _randomBot, sPlayerbotMgr->GetGearOptions().bagEntry));
         return true;
     }
     if (order == "talents" || order.rfind("talents ", 0) == 0)
@@ -1465,6 +1523,8 @@ void PlayerbotAI::Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role
     _combatTarget = enemy->GetGUID();
     _engaged = true;
     _followGuid.Clear();
+    if (bot->HasAuraType(SPELL_AURA_MOUNTED))
+        bot->RemoveAurasByType(SPELL_AURA_MOUNTED);
 
     if (bot->getVictim() != enemy)
         bot->Attack(enemy, melee);

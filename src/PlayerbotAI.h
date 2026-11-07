@@ -142,6 +142,8 @@ private:
     void TalentsOrder(Player* bot, OrderSender const& sender, std::string const& args);
     bool AssistOrder(Player* bot, OrderSender const& sender, std::string const& mode);
     void UpdateFollow(Player* bot);
+    // mounts / dismounts with its leader (owner's rule, 2026-11-07); called by UpdateFollow
+    void UpdateMount(Player* bot);
     // dungeon finder: answers its group's role check by its spec and accepts proposals, as a client would
     void UpdateLfg(Player* bot);
     // a bot leading a dungeon finder group gives the lead to a real player of it (owner, build #28: the core offers

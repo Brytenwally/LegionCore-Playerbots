@@ -91,6 +91,9 @@ When you log out, the bots of your account (your alts) log out with you.
   Gorge, release and resurrect at the spirit healer, and leave when it is over. They walk along
   waypoint paths in Warsong Gulch, Arathi Basin, Alterac Valley, Eye of the Storm and Isle of Conquest
   and never take a path through walls.
+- **Mounts**: a bot in your party mounts when you mount (a flier if you fly and its riding allows) and dismounts when
+  you do or a fight starts, outdoors, if it has riding and a mount. Random bots always get the riding of their level and
+  a racial mount when they are set up.
 - **Self-bot**: `.playerbots self` lets the AI play your own character: it attacks your target (a
   hostile one, or one already fighting) and whatever attacks the group, moving to it and casting
   your spec's rotation, follows your group's leader and takes the same orders (whisper yourself or
@@ -104,7 +107,9 @@ When you log out, the bots of your account (your alts) log out with you.
   Draenei, Nightborne, Highmountain Tauren) from level 10 (`Playerbots.Create.AlliedRaceLevel`).
   `Playerbots.DeleteBotAccounts = 1` deletes every bot account and its characters at the next startup
   (no pool that time); set it back to 0 and restart to build a new pool. Orders `talents` (show; `talents
-  <spec>` switches) and `autogear` (upgrades for the spec by stat weights, each a random one of
+  <spec>` switches), `maintenance` (talents by the spec's blueprint, riding skills and a racial mount for
+  its level, level-adequate enchants and gems by the spec's stat weights, bags, repair; an alt's own enchants are kept)
+  and `autogear` (upgrades for the spec by stat weights, each a random one of
   the 5 best for its slot, within `Playerbots.AutoGear.*` limits; empty bag slots get large bags
   first, replaced pieces go to the bags).
 - **Loot**: in group loot bots roll need on gear that is at least a 5% upgrade for their spec
@@ -119,7 +124,7 @@ When you log out, the bots of your account (your alts) log out with you.
 
 ## Comparison with AzerothCore playerbots
 
-Status as of 2026-11-07, build #32. **Verified** = tested on the owner's server and working. **Built** = written
+Status as of 2026-11-07, build #32 plus `maintenance` and mounts (built after it). **Verified** = tested on the owner's server and working. **Built** = written
 and compiling, waiting for its in-game test. **Missing** = not started; the roadmap below orders them. AzerothCore's
 code is a 3.3.5 module with its own strategy / trigger / action / value engine; here the same behaviours are rewritten
 directly for Legion, so the comparison is by feature, not by file.
@@ -156,6 +161,8 @@ directly for Legion, so the comparison is by feature, not by file.
 | Battlegrounds | PvP targeting, release and spirit healer, leave at the end | BG strategies, `ReleaseSpirit` |
 | Battlegrounds | Tactics: Warsong Gulch / Twin Peaks flags; Arathi Basin / Battle for Gilneas / Deepwind Gorge bases; others go where the enemy is | `BGTactics` (WS, AB; AV / EotS / IoC partly) |
 | Battlegrounds | Guarded pathfinding and AzerothCore's waypoint paths (WSG, AB, AV, EotS, IoC) | vmangos `BattleBotPath`s |
+| Upkeep | `maintenance`: talents by blueprint, riding and a racial mount per tier, level-adequate enchants and gems by stat weights, bags, repair | `maintenance` (SkyFire `MaintainBot`) |
+| Movement | Party bots mount and dismount with their leader (fliers when he flies); random bots set up with riding and a mount | `CheckMountState` |
 
 ### Missing (roadmap)
 
@@ -171,9 +178,9 @@ directly for Legion, so the comparison is by feature, not by file.
 | Combat | Ground-effect dodge and fleeing, crowd control, raid target icons (`rti`), focus heal targets, healers dealing damage when idle | avoid AoE, CC, `rti`, focus heal | |
 | Combat | Hand-made lists for the 8 specs without a SimC profile (most healers, Protection Warrior, Vengeance) | class strategies | |
 | Pets | Hunter taming and pet management, warlock pets beyond the precombat summon, pet talents | `Tame`, pet strategies | |
-| Movement | Mounts (ground and flying), flight paths, following across maps on its own | `CheckMountState`, `Taxi` | |
+| Movement | Flight paths, following across maps on its own, flying follow tested | `Taxi` | |
 | Items | Vendors (sell, buy, repair), bank, mail, trade with players, use / open / destroy items by order | `Sell`, `Buy`, `RepairAll`, `Bank`, `Mail`, `Trade` | |
-| Items | Gems and enchants, consumables (flasks, food buffs), bonus IDs and `Game.Patch` item level tiers | maintenance enchants | |
+| Items | Consumables (flasks, food buffs), bonus IDs and `Game.Patch` item level tiers, scaling enchants | maintenance consumables | |
 | Legion | Artifact weapons and traits, relics, PvP talents, class halls | none | Legion only |
 | Professions | Crafting, gathering, fishing | `SetCraft`, `Fishing`, gathering | |
 | Social | Guilds (create, invite, guild bank), chat replies and emotes, `who`, `stats`, `reputation` and other tell commands, ready checks, resurrection acceptance | guild actions, `Say`, `Emote`, tell actions, `ReadyCheck`, `AcceptResurrect` | |
@@ -189,8 +196,8 @@ directly for Legion, so the comparison is by feature, not by file.
 3. **Combat depth**: ground-effect dodge, crowd control, raid target icons, hand-made lists for the specs without a
    SimC profile, healer damage, pets and hunter taming.
 4. **Dungeons and raids**: boss strategies for Legion dungeons, then raids; LFR and scenarios.
-5. **Character upkeep**: mounts and flight paths, vendors / repair / bank / mail / trade, gems and enchants,
-   consumables, bonus IDs and `Game.Patch` tiers, artifact weapons and traits.
+5. **Character upkeep**: flight paths, vendors / repair / bank / mail / trade, consumables, bonus IDs and `Game.Patch`
+   tiers, artifact weapons and traits.
 6. **Social and professions**: guilds, chat and emotes, tell commands, ready checks, professions.
 7. **Last (owner's priority)**: random bots' own life in the open world (questing, travel, grinding, level spread).
 

@@ -797,6 +797,44 @@ this core's battlegrounds in `src/pvp/BotBattleground.*`.
   (AzerothCore has AV / EotS / IoC ones), waypoint paths (pathfinding only: `MovePoint` with mmaps), mounts, arenas
   queues and tactics, rated play, vehicles.
 
+## Maintenance, riding and mounts (2026-11-07, untested)
+
+Owner's request: SkyFire's `maintenance` (talents by blueprint, riding and a racial mount per riding tier, level-adequate
+enchants and gems by stat weights), random bots always set up with the riding of their level, and party bots mounting
+with their leader. `src/BotMaintenance.*`; the order `maintenance` (owner only, not in combat; an order, so allowed on
+alts: an alt's existing enchants are never replaced, only bare items get one).
+- **Talents**: `BotFactory::FillTalents` (empty rows only, the spec's blueprint: SimC `talents=` digit, else the build
+  table, else random), as everywhere else.
+- **Riding** (`LearnRiding`): Apprentice 33388 (20), Journeyman 33391 (40), Expert 34090 (60), Artisan 34091 (70), Master
+  90265 (80), and the old licences where the spell exists (Flight Master's License 90267, Cold Weather Flying 54197,
+  Wisdom of the Four Winds 115913); for each tier reached without one, a random **racial** ground mount (normal at
+  20-39, swift from 40; lists per race incl. pandaren and allied races, the faction's human / orc mounts for others) and
+  a faction **flier** (gryphon / wind rider; swift from 70), each checked against `Mount.db2` (`sDB2Manager.GetMount`) and
+  added with `CollectionMgr::AddMount` (which learns the spell; mounts are account-wide on Legion). Legion mount speed
+  follows the riding skill, so one mount per kind is enough. Random bots get this in `BotFactory::InitializeNewBot`;
+  `ResetBot` removes the riding spells above the bot's starting level (`ForgetRiding`; mounts stay in the collection).
+  The allied race mount ids (258845, 258060, 259202, 258022) are from memory: an invalid one is just skipped.
+- **Mounting with the leader** (`PlayerbotAI::UpdateMount`, from `UpdateFollow` every 500 ms): leader = master if in the
+  group, else the group leader, same map. Leader mounted, bot not, out of combat, outdoors (`Map::IsOutdoors`), not in
+  water, not resting / looting / casting: `MountSpellFor` (a flier when the leader flies, `IsFlying` / `SPELL_AURA_FLY`,
+  and the bot has Expert riding or better, else a ground mount; its own known mount spells, fliers by our lists or
+  `MountTypeID` 247 / 248), stand still, cast. Leader dismounted, a fight, or the bot engaging (`Engage`): dismount.
+  Not in battlegrounds / arenas. Following a flying leader in the air is left to the core's follow movement (untested).
+- **Enchants and gems** (`ApplyEnchantsAndGems`): candidates once (`BuildCandidates`): Enchanting recipes
+  (`SkillLineAbility` of `SKILL_ENCHANTING`) and item enhancements with a required level, whose spell has
+  `SPELL_EFFECT_ENCHANT_ITEM`; gems (`ITEM_CLASS_GEM`, `GemProperties` fitting prismatic sockets, not unique, not relics);
+  only enchantments with fixed stat amounts and no profession / scaling requirement. Score = `BotGear::StatWeight` (the
+  same Ask Mr. Robot weights as autogear, new) x amount. **Level adequacy**: recipe skill ranks do not tell a level on
+  7.3.5 (Legion recipes are learnable from skill 1), so an enchant's or gem's raw stat points may be at most 40% of the
+  item's budget (`RandPropPoints` Epic[0] at the item's level, SkyFire's `EnchantBudgetShare` idea); plus the enchant's
+  `MinLevel`, an enhancement's required level, a gem's required level, its item level within `BotGear::ItemLevelCap`
+  and the item's level over the gem's `MinItemLevel`. Enchants as `Spell::EffectEnchantItemPerm` (permanent slot, fits by
+  `Item::IsFitToSpellRequirements`), gems as `WorldSession::HandleSocketGems` without gem items (`_ApplyItemMods` off,
+  `SetGem` + socket enchantment, on, socket bonus toggled). Artifacts are skipped. Logged once: `Maintenance: N enchant(s)
+  and M gem(s) available to bots.`
+- Then large bags in empty bag slots (`BotGear::AddBags`), `DurabilityRepairAll`, `SaveToDB`; the bot whispers a summary
+  (`Maintenance done: talents, riding skills, mounts, enchants, gems, bags, repaired.`).
+
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
 Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.

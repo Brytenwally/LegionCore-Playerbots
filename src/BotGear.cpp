@@ -217,6 +217,32 @@ namespace BotGear
         return ItemLevelCapFor(level, options);
     }
 
+    float StatWeight(Player const* bot, int32 itemMod)
+    {
+        auto itr = WeightTable.find(bot->GetSpecializationId());
+        if (itr == WeightTable.end())
+            return 0.0f;
+        Weights const& w = itr->second;
+        switch (itemMod)
+        {
+            case ITEM_MOD_STRENGTH:        return w.strength;
+            case ITEM_MOD_AGILITY:         return w.agility;
+            case ITEM_MOD_INTELLECT:       return w.intellect;
+            case ITEM_MOD_AGI_STR_INT:     return std::max({ w.agility, w.strength, w.intellect });
+            case ITEM_MOD_AGI_STR:         return std::max(w.agility, w.strength);
+            case ITEM_MOD_AGI_INT:         return std::max(w.agility, w.intellect);
+            case ITEM_MOD_STR_INT:         return std::max(w.strength, w.intellect);
+            case ITEM_MOD_STAMINA:         return w.stamina;
+            case ITEM_MOD_CRIT_RATING:     return w.crit;
+            case ITEM_MOD_HASTE_RATING:    return w.haste;
+            case ITEM_MOD_MASTERY_RATING:  return w.mastery;
+            case ITEM_MOD_VERSATILITY:     return w.versatility;
+            case ITEM_MOD_CR_LIFESTEAL:    return w.leech;
+            case ITEM_MOD_CR_AVOIDANCE:    return w.avoidance;
+            default:                       return 0.0f;
+        }
+    }
+
     float ItemScore(Player const* bot, ItemTemplate const* proto, uint32 itemLevel)
     {
         auto itr = WeightTable.find(bot->GetSpecializationId());
