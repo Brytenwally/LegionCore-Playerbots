@@ -941,6 +941,9 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   of a member as described, pool bot races are mixed, the battleground fill is correct. Movement: **better than
   build #31, still not right**: some bots still climb walls, and walking the waypoints looks robotic; the owner keeps
   it as is for now (to improve later: smoother routes, the remaining wall climbs).
+  Battleground tactics (same build): **rudimentary but working**, a solid base; their logic is to be improved later.
+  The place-for-a-player and top-up rules are **not testable yet**: they need a second human player (to be tested once
+  the project is public).
 
 ## Checking
 
