@@ -14,6 +14,7 @@
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "Opcodes.h"
+#include "PathGenerator.h"
 #include "Pet.h"
 #include "Player.h"
 #include "PlayerDefines.h"
@@ -171,18 +172,111 @@ namespace
         bot->RemoveUnitMovementFlag(MOVEMENTFLAG_MASK_MOVING);
     }
 
+    Position NearPoint(Player* bot, Position const& center, float radius);
+
+    // One guarded step towards dest (owner, build #31: bots walked through walls and up cliffs). The path is computed
+    // first; no path or a straight-line "shortcut" (PathGenerator's fallback through walls and terrain) is refused, and
+    // a long path is walked in steps of HopLength yards along it (one path holds at most MAX_PATH_LENGTH polygons, so a
+    // trip across the map came back incomplete and ended in that same shortcut). Without movement maps (or swimming) only
+    // a short step in sight is allowed. False when no such step exists.
+    float const HopLength = 50.0f;
+
+    bool Step(Player* bot, BotBattleground::State& state, Position const& dest)
+    {
+        PathGenerator path(bot);
+        path.CalculatePath(dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ(), false);
+        PathType const type = path.GetPathType();
+        Position hop = dest;
+        if (type & PATHFIND_NOT_USING_PATH)
+        {
+            if (bot->GetExactDist(&dest) > 40.0f || !bot->IsWithinLOS(dest.GetPositionX(), dest.GetPositionY(), dest.GetPositionZ()))
+                return false;
+        }
+        else if (type & (PATHFIND_NOPATH | PATHFIND_SHORTCUT))
+            return false;
+        else
+        {
+            Movement::PointsArray const& points = path.GetPath();
+            if (points.size() < 2)
+                return false;
+            float walked = 0.0f;
+            size_t i = 1;
+            for (; i < points.size(); ++i)
+            {
+                walked += (points[i] - points[i - 1]).length();
+                if (walked >= HopLength)
+                    break;
+            }
+            G3D::Vector3 const& end = points[std::min(i, points.size() - 1)];
+            hop.Relocate(end.x, end.y, end.z);
+        }
+        state.hop = hop;
+        MotionMaster* motion = bot->GetMotionMaster();
+        motion->Clear();
+        motion->MovePoint(MoveId, hop.GetPositionX(), hop.GetPositionY(), hop.GetPositionZ(), true);
+        return true;
+    }
+
+    // Towards pos: far away on a map with waypoint paths (Warsong Gulch, Arathi Basin, Alterac Valley, Eye of the Storm,
+    // Isle of Conquest), along the waypoints first; every step guarded (Step). A target nothing leads to is left standing
+    // (logged once) after a short random step, never walked to through a wall.
+    float const RouteMinDistance = 45.0f;
+
     void MoveTo(Player* bot, BotBattleground::State& state, Position const& pos)
     {
         MotionMaster* motion = bot->GetMotionMaster();
-        bool const same = state.hasTarget && state.target.GetExactDist(&pos) < 3.0f;
-        if (same && motion->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE)
+        bool const newTarget = !state.hasTarget || state.target.GetExactDist(&pos) >= 3.0f;
+        if (newTarget)
+        {
+            state.target = pos;
+            state.hasTarget = true;
+            state.stuckTime = 0;
+            state.lastPos = bot->GetPosition();
+            state.route.clear();
+            state.routeIndex = 0;
+            state.routeTried = false;
+            state.failLogged = false;
+        }
+        else if (motion->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE && bot->GetExactDist(&state.hop) > 3.0f)
+            return;                                         // still walking the current step
+
+        if (bot->GetExactDist(&pos) > RouteMinDistance)
+        {
+            if (!state.routeTried)
+            {
+                state.routeTried = true;
+                state.route = BotBattleground::Route(bot->GetMapId(),
+                    { bot->GetPositionX(), bot->GetPositionY(), bot->GetPositionZ() },
+                    { pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ() });
+                state.routeIndex = 0;
+            }
+            while (state.routeIndex < state.route.size())
+            {
+                BotBattleground::PathPoint const& point = state.route[state.routeIndex];
+                if (bot->GetExactDist(point.x, point.y, point.z) > 5.0f)
+                    break;
+                ++state.routeIndex;
+            }
+            if (state.routeIndex < state.route.size())
+            {
+                BotBattleground::PathPoint const& point = state.route[state.routeIndex];
+                if (Step(bot, state, Position(point.x, point.y, point.z)))
+                    return;
+                ++state.routeIndex;                         // an unreachable waypoint: the next one, then the target
+            }
+        }
+
+        if (Step(bot, state, pos))
             return;
-        state.target = pos;
-        state.hasTarget = true;
-        state.stuckTime = 0;
-        state.lastPos = bot->GetPosition();
-        motion->Clear();
-        motion->MovePoint(MoveId, pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), true);
+
+        if (!state.failLogged)
+        {
+            state.failLogged = true;
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' finds no path to %.1f %.1f %.1f (map %u): it does not walk through walls.",
+                bot->GetName(), pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(), bot->GetMapId());
+        }
+        // perhaps it stands off the movement map: a short step nearby, then the next check tries again
+        Step(bot, state, NearPoint(bot, bot->GetPosition(), 10.0f));
     }
 
     Position NearPoint(Player* bot, Position const& center, float radius)

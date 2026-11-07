@@ -21,7 +21,9 @@
 #include "Define.h"
 #include "ObjectGuid.h"
 #include "Position.h"
+#include "BotBattlegroundPaths.h"
 #include <string>
+#include <vector>
 
 class Battleground;
 class Player;
@@ -36,6 +38,11 @@ namespace BotBattleground
         ObjectGuid objective;                               // the flag / banner it goes for
         Position target;                                    // where it is heading
         bool hasTarget = false;
+        Position hop;                                       // the step being walked towards it (pathfinding, <= 50 yd)
+        std::vector<PathPoint> route;                       // waypoints towards a far target (BotBattlegroundPaths)
+        size_t routeIndex = 0;
+        bool routeTried = false;
+        bool failLogged = false;
         uint32 selectTimer = 0;                             // ms until the objective is chosen again
         Position lastPos;                                   // stuck check
         uint32 stuckTime = 0;

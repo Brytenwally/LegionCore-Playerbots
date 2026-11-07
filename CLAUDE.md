@@ -765,6 +765,26 @@ this core's battlegrounds in `src/pvp/BotBattleground.*`.
   up to 60 yd of random so a team spreads), defenders guard one of ours (an enemy assault on it is retaken). At 4 yd the
   banner is opened with its lock's spell (`OpenSpellFor`: the spell whose `SPELL_EFFECT_OPEN_LOCK` has the lock's type,
   a cast-time one first, indexed once) as a client would, else used directly.
+- **Movement** (owner, build #31: bots walked through walls and climbed unclimbable cliffs in battlegrounds). Cause:
+  `MovePoint` with pathfinding falls back to a straight line through anything when `PathGenerator` finds no path
+  (`PATHFIND_NOPATH` / `SHORTCUT`), and a path holds at most `MAX_PATH_LENGTH` (74) polygons, so the tactics' trips across
+  the map came back incomplete and ended the same way; missing or partial movement maps for a battleground map make it
+  worse. Now (`BotBattleground.cpp`):
+  - **Guarded steps** (`Step`): the bot computes the path itself; no path or a shortcut is refused; a long path is walked
+    in steps of 50 yd along it (`MovePoint` to the point 50 yd along); without movement maps (or swimming,
+    `PATHFIND_NOT_USING_PATH`) only a step of at most 40 yd in sight. A target nothing leads to is logged once (`finds no
+    path to ...: it does not walk through walls`) and the bot takes a short random step (it may stand off the mesh).
+  - **Waypoint routes** (`BotBattlegroundPaths.*`, `BotBattlegroundRoute.cpp`): AzerothCore's 104 vmangos paths for
+    Warsong Gulch 489, Arathi Basin 529, Alterac Valley 30, Eye of the Storm 566 and Isle of Conquest 628, extracted by
+    `tools/bg_paths_from_azerothcore.py` (generated file, coordinates kept: the maps are the same on 7.3.5; 4 one-way
+    jump paths). One graph per map: consecutive points linked (one way for jumps), points of different paths linked
+    within 15 yd, or 30 yd when one is a path's end (at 6 yd AV fell into 18 pieces, EotS 10, WSG 2; AzerothCore crosses
+    the gaps by pathfinding). Beyond 45 yd the bot takes the shortest chain (Dijkstra) from the waypoint nearest to it to
+    the one nearest the target (both within 60 yd), walks it waypoint by waypoint (each a guarded step; an unreachable
+    waypoint is skipped), then goes straight. Checked offline: WSG flag room to flag room 31 waypoints, AB bases to nodes
+    18-28, AV start to start 99, EotS start to start 25; **Isle of Conquest's two halves stay apart even at 30 yd** (its
+    routes work within each half). Twin Peaks, Battle for Gilneas, Silvershard, Kotmogu, Deepwind Gorge and Seething
+    Shore have no paths: guarded steps only (step 3, recording routes in game, only if they still misbehave).
 - **Others** (Eye of the Storm towers and flag, Alterac Valley, Isle of Conquest, Strand, Silvershard, Kotmogu,
   Seething Shore): the nearest enemy player anywhere, else a teammate more than 20 yd away. Not yet: their own tactics
   (AzerothCore has AV / EotS / IoC ones), waypoint paths (pathfinding only: `MovePoint` with mmaps), mounts, arenas
