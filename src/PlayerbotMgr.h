@@ -72,6 +72,8 @@ public:
         bool autoEquip = true;
         bool autoEquipAlts = false;     // alt rule: nothing changes an alt unless ordered
         float equipUpgradePct = 5.0f;
+        bool autoSellGray = true;       // sell gray items when standing at a vendor
+        bool autoSellGrayAlts = false;  // alt rule: nothing changes an alt unless ordered
     };
     LootOptions const& GetLootOptions() const { return _loot; }
 

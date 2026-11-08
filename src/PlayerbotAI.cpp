@@ -25,6 +25,7 @@
 #include "BotGear.h"
 #include "BotMaintenance.h"
 #include "BotConsumables.h"
+#include "BotSell.h"
 #include "BotFormation.h"
 #include "Chat.h"
 #include "GameTime.h"
@@ -188,6 +189,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         _lootTimer = 0;
         UpdateLootRolls(bot);
         UpdateBagEquip(bot);
+        UpdateAutoSell(bot);
     }
 
     _corpseTimer += diff;
@@ -647,7 +649,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, maintenance, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, maintenance, sell <gray|vendor|quality [all]|item>, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -710,6 +712,14 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "autogear")
     {
         AutoGearOrder(bot, sender);
+        return true;
+    }
+
+    // AzerothCore's "sell" and its short form "s"; an order, so allowed on alts
+    if (order == "sell" || order == "s" || order.rfind("sell ", 0) == 0 || order.rfind("s ", 0) == 0)
+    {
+        size_t const space = text.find(' ');
+        SellOrder(bot, sender, space == std::string::npos ? std::string() : text.substr(space + 1));
         return true;
     }
 
@@ -2718,6 +2728,63 @@ void PlayerbotAI::UpdateLootRolls(Player* bot)
         // as WorldSession::HandleLootRoll, on the voter's own thread
         group->CountRollVote(bot, roll.aoeSlot, choice);
     }
+}
+
+void PlayerbotAI::SellOrder(Player* bot, OrderSender const& sender, std::string const& args)
+{
+    if (args.empty())
+    {
+        Say(bot, sender.guid, "Usage: sell gray / * / vendor / <quality> [all] / <item link or name>.");
+        return;
+    }
+    if (bot->isInCombat())
+    {
+        Say(bot, sender.guid, "Not in combat.");
+        return;
+    }
+    Creature* vendor = BotSell::FindVendor(bot);
+    if (!vendor)
+    {
+        Say(bot, sender.guid, "There is no vendor within reach.");
+        return;
+    }
+    BotSell::Result result;
+    if (!BotSell::Sell(bot, vendor, args, result))
+    {
+        Say(bot, sender.guid, "Usage: sell gray / * / vendor / <quality> [all] / <item link or name>.");
+        return;
+    }
+    if (!result.items)
+        Say(bot, sender.guid, "Nothing to sell.");
+    else
+        Say(bot, sender.guid, "Sold " + std::to_string(result.items) + " item(s) for " + BotSell::FormatMoney(result.money) +
+            ": " + result.names);
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' sells (%s) to %s: %u item(s), %s.", bot->GetName(),
+        args.c_str(), vendor->GetName(), result.items, BotSell::FormatMoney(result.money).c_str());
+}
+
+// Owner's request (2026-11-08): gray loot is sold as soon as the bot stands at a vendor. Alts only with
+// Playerbots.Sell.AutoGrayAlts = 1 (nothing changes an alt unless the player orders it)
+void PlayerbotAI::UpdateAutoSell(Player* bot)
+{
+    PlayerbotMgr::LootOptions const& options = sPlayerbotMgr->GetLootOptions();
+    if (!options.autoSellGray || _selfBot || (!_randomBot && !options.autoSellGrayAlts))
+        return;
+    if (!bot->IsAlive() || bot->isInCombat() || _groupInFight || bot->IsNonMeleeSpellCast(false))
+        return;
+    if (!BotSell::HasGrayItems(bot))
+        return;
+    Creature* vendor = BotSell::FindVendor(bot);
+    if (!vendor)
+        return;
+    BotSell::Result result;
+    BotSell::Sell(bot, vendor, "gray", result);
+    if (!result.items)
+        return;
+    TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' sells %u gray item(s) to %s for %s.", bot->GetName(),
+        result.items, vendor->GetName(), BotSell::FormatMoney(result.money).c_str());
+    if (!_master.IsEmpty() && _master != bot->GetGUID())
+        Say(bot, _master, "Sold " + std::to_string(result.items) + " gray item(s) for " + BotSell::FormatMoney(result.money) + ".");
 }
 
 void PlayerbotAI::UpdateBagEquip(Player* bot)

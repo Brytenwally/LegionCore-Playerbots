@@ -107,7 +107,8 @@ When you log out, the bots of your account (your alts) log out with you.
   Draenei, Nightborne, Highmountain Tauren) from level 10 (`Playerbots.Create.AlliedRaceLevel`).
   `Playerbots.DeleteBotAccounts = 1` deletes every bot account and its characters at the next startup
   (no pool that time); set it back to 0 and restart to build a new pool. Orders `talents` (show; `talents
-  <spec>` switches), `maintenance` (talents by the spec's blueprint, riding skills and a racial mount for
+  <spec>` switches), `sell gray|vendor|<quality> [all]|<item>` (at a vendor within reach; gray loot is also sold
+  automatically at a vendor, `Playerbots.Sell.AutoGray`), `maintenance` (talents by the spec's blueprint, riding skills and a racial mount for
   its level, level-adequate enchants and gems by the spec's stat weights, bags, repair; an alt's own enchants are kept)
   and `autogear` (upgrades for the spec by stat weights, each a random one of
   the 5 best for its slot, within `Playerbots.AutoGear.*` limits; empty bag slots get large bags
@@ -124,7 +125,7 @@ When you log out, the bots of your account (your alts) log out with you.
 
 ## Comparison with AzerothCore playerbots
 
-Status as of 2026-11-07: build #33 tested (`maintenance`, riding, mounts); the flying follow rewritten after it. **Verified** = tested on the owner's server and working. **Built** = written
+Status as of 2026-11-08: build #33 tested (`maintenance`, riding, mounts); the flying follow and the `sell` order built after it. **Verified** = tested on the owner's server and working. **Built** = written
 and compiling, waiting for its in-game test. **Missing** = not started; the roadmap below orders them. AzerothCore's
 code is a 3.3.5 module with its own strategy / trigger / action / value engine; here the same behaviours are rewritten
 directly for Legion, so the comparison is by feature, not by file.
@@ -165,6 +166,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Battlegrounds | Party bots enter with their leader; bots give a later player their place; top-ups after a refusal (needs a second human player: to be tested once the project is public) | `BattleGroundJoin` |
 | Battlegrounds | PvP targeting, release and spirit healer, leave at the end | BG strategies, `ReleaseSpirit` |
 | Movement | Following a flying leader: fly flags by hand, straight flight at his height, swap to the flier on takeoff, landing beside him, walking beneath him without flying riding (build #33's flying follow was messy) | `UpdateMovementState`, SkyFire's flying follow |
+| Items | `sell` / `s` order: gray / `*`, `vendor` (gray and gear it cannot use or that is no upgrade), `<quality> [all]`, item links or names, at a vendor within reach (the core's sell handler); gray loot sold automatically at a vendor (`Playerbots.Sell.AutoGray`, alts only with `AutoGrayAlts`) | `SellAction` (`s`) |
 
 ### Missing (roadmap)
 
@@ -183,7 +185,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Combat | Hand-made lists for the 8 specs without a SimC profile (most healers, Protection Warrior, Vengeance) | class strategies | |
 | Pets | Hunter taming and pet management, warlock pets beyond the precombat summon, pet talents | `Tame`, pet strategies | |
 | Movement | Flight paths, following across maps on its own | `Taxi` | |
-| Items | Vendors (sell, buy, repair), bank, mail, trade with players, use / open / destroy items by order | `Sell`, `Buy`, `RepairAll`, `Bank`, `Mail`, `Trade` | |
+| Items | Vendors (buy, repair), bank, mail, trade with players, use / open / destroy items by order | `Sell`, `Buy`, `RepairAll`, `Bank`, `Mail`, `Trade` | |
 | Items | Consumables (flasks, food buffs), bonus IDs and `Game.Patch` item level tiers, scaling enchants | maintenance consumables | |
 | Legion | Artifact weapons and traits, relics, PvP talents, class halls | none | Legion only |
 | Professions | Crafting, gathering, fishing | `SetCraft`, `Fishing`, gathering | |

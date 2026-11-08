@@ -170,6 +170,10 @@ private:
     // an item that reached the bags and beats the worn piece by Playerbots.AutoEquip.UpgradePct is put on;
     // in combat it waits for the end of the fight
     void UpdateBagEquip(Player* bot);
+    // "sell <gray|*|vendor|quality [all]|item links|name>" (AzerothCore's SellAction), at a vendor within reach
+    void SellOrder(Player* bot, OrderSender const& sender, std::string const& args);
+    // gray items sold as soon as the bot stands at a vendor (Playerbots.Sell.AutoGray)
+    void UpdateAutoSell(Player* bot);
     bool EquipFromBag(Player* bot, Item* item, BotGear::Comparison const& comparison);
     bool FormationOrder(Player* bot, OrderSender const& sender, std::string const& args);
 

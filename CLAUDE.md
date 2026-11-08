@@ -857,6 +857,30 @@ alts: an alt's existing enchants are never replaced, only bare items get one).
 - Then large bags in empty bag slots (`BotGear::AddBags`), `DurabilityRepairAll`, `SaveToDB`; the bot whispers a summary
   (`Maintenance done: talents, riding skills, mounts, enchants, gems, bags, repaired.`).
 
+## Selling (2026-11-08, untested)
+
+Owner's request: AzerothCore's `sell` command, and gray loot always sold once near a vendor (configurable).
+`src/BotSell.*`; reference `mod-playerbots/src/Ai/Base/Actions/SellAction.cpp` (SkyFire's `SellVendorJunk` removed
+items by hand instead).
+- Order `sell <args>` / `s <args>` (owner only; an order, so allowed on alts; not in combat): `gray` / `grey` / `*` (gray
+  items), `vendor` (AzerothCore's item usage vendor/AH: gray items, and armor / weapons up to epic that
+  `BotGear::CompareToWorn` finds unusable or no upgrade), `<quality> [all]` (poor/gray, normal/white, uncommon/green,
+  rare/blue, epic/purple, legendary: up to that quality, equipment only unless `all`; AzerothCore's
+  `SellQualityItemsVisitor`), else item links (every `Hitem:<id>`) or a name (bag items whose English name contains
+  it). Profession tools (fishing poles, miscellaneous weapons, totem category) are kept, as on AzerothCore. Only bag
+  items, never worn ones. The bot whispers the count, the money and the first names.
+- Each sale goes through the core: `WorldSession::HandleSellItemOpcode` with a `WorldPackets::Item::SellItem` built on
+  the bot's thread (as AzerothCore), so the vendor must be within interaction range (`GetNPCIfCanInteractWith`), and
+  buyback, money, achievements and quest item checks are the core's. Skipped before calling it: items without a sell
+  price, bags with something in them, artifacts and **refundable items (the handler refunds those instead of selling
+  them)**. A sale counts when the money went up. `FindVendor`: the nearest live vendor within 10 yd the bot can
+  interact with.
+- `UpdateAutoSell` (every 1 s with the loot checks): out of combat, no group fight, not casting, gray items in the bags
+  and a vendor within reach -> sells the gray items, logs it and whispers its master. `Playerbots.Sell.AutoGray` (1),
+  `Playerbots.Sell.AutoGrayAlts` (0: alts only by order). Self-bots never.
+- C++ note: `WorldPackets::Item::SellItem packet(WorldPacket(CMSG_SELL_ITEM));` is a function declaration (most vexing
+  parse); build it with braces.
+
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
 Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.

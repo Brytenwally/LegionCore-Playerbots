@@ -58,6 +58,8 @@ void PlayerbotMgr::LoadConfig()
     _loot.autoEquip = sConfigMgr->GetBoolDefault("Playerbots.AutoEquip.Enable", true);
     _loot.autoEquipAlts = sConfigMgr->GetBoolDefault("Playerbots.AutoEquip.Alts", false);
     _loot.equipUpgradePct = sConfigMgr->GetFloatDefault("Playerbots.AutoEquip.UpgradePct", 5.0f);
+    _loot.autoSellGray = sConfigMgr->GetBoolDefault("Playerbots.Sell.AutoGray", true);
+    _loot.autoSellGrayAlts = sConfigMgr->GetBoolDefault("Playerbots.Sell.AutoGrayAlts", false);
     {
         std::string formation = sConfigMgr->GetStringDefault("Playerbots.Formation.Default", "role");
         std::transform(formation.begin(), formation.end(), formation.begin(), [](unsigned char c) { return char(std::tolower(c)); });

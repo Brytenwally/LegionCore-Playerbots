@@ -321,6 +321,18 @@ Playerbots.AutoEquip.Enable = 1
 Playerbots.AutoEquip.Alts = 0
 Playerbots.AutoEquip.UpgradePct = 5
 
+#
+#    Playerbots.Sell.AutoGray
+#    Playerbots.Sell.AutoGrayAlts
+#        A bot standing at a vendor (within interaction range) sells its gray items at once, through
+#        the core's own sell handler (buyback, money), and whispers its master what it earned. The
+#        "sell" order (gray / vendor / <quality> [all] / item) works whatever these say. Alt bots only
+#        with AutoGrayAlts = 1 (nothing changes an alt unless the player orders it).
+#        Default: 1, 0
+
+Playerbots.Sell.AutoGray = 1
+Playerbots.Sell.AutoGrayAlts = 0
+
 ###################################################################################################
 # STRATEGIES (co = combat, nc = non-combat; "co ?", "co +name,-name", "nc ?", "nc +name" orders)
 ###################################################################################################
