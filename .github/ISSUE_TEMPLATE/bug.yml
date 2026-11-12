@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible problem with the playerbots module
+labels: ["bug"]
+body:
+  - type: textarea
+    id: version
+    attributes:
+      label: Core revision and setup
+      description: |
+        Playerbots and core commits or build (BUILD-INFO.txt of a DemonCore-Build package lists both), operating
+        system, MySQL version, and the playerbots.conf settings you changed from the defaults.
+      placeholder: |
+        Build #41, core 2cdf98c, playerbots 2e80e0e
+        Windows 11, MySQL 8.0.44
+        Playerbots.Pool.Characters = 600, Playerbots.LFG.FillDelay = 30
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction, expected result and actual result
+      description: |
+        The steps that make it happen, what you expected and what happened instead. Say which bots were involved
+        (class, spec, level; random bot from the pool or your own alt) and the commands or orders you used
+        (`.playerbots add`, `co +aggressive`, `autogear`...).
+      placeholder: |
+        1. `.playerbots create priest holy`, invite it, queue for a random dungeon
+        2. Pull a pack of mobs
+        Expected: the priest heals the tank
+        Actual: the priest follows the player and does not cast
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Minimal redacted evidence and verification limits
+      description: |
+        The `[mod-playerbots]` worldserver log lines around it (`Playerbots.Combat.Log = 2` adds every skipped spell),
+        crash log, screenshots; what you already tried and what you could not test.
+        Do not include passwords, account details or database dumps.
+      render: text

@@ -1,0 +1,25 @@
+name: Missing feature
+description: Ask for a bot behaviour that is missing, e.g. one AzerothCore playerbots has
+labels: ["missing feature"]
+body:
+  - type: textarea
+    id: version
+    attributes:
+      label: Core revision and setup
+      description: Playerbots and core commits or build.
+    validations:
+      required: true
+  - type: textarea
+    id: feature
+    attributes:
+      label: What is missing, and how it should work
+      description: |
+        The behaviour, order or command you expected, and where it comes from (AzerothCore mod-playerbots, retail
+        group play...). The README's comparison table lists what is already built.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What happens now
+      description: What the bots do today, with log lines or screenshots if any. No passwords or account details.
