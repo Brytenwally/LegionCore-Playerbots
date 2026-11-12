@@ -1,11 +1,19 @@
 # CLAUDE.md
 
-Notes for Claude sessions working on LegionCore-Playerbots. **Keep this file up to date** with
+Notes for Claude sessions working on DemonCore-Playerbots. **Keep this file up to date** with
 anything future sessions need, in the same commit as the change.
+
+## Naming (owner, 2026-11-12)
+
+The project is **DemonCore** (GitHub organization `DemonCore`): this module is `DemonCore/DemonCore-Playerbots` (was
+`Brytenwally/LegionCore-Playerbots`), the core `DemonCore/DemonCore` (was `Brytenwally/LegionCore-Reforged`), the build
+`DemonCore/DemonCore-Build` (was `Brytenwally/LegionCore-Build`). Mentions of the **LegionCore-7.3.5** fork (LegionBotAI) and of
+upstream LegionCore - Reforged keep their names: they are other projects. The module folder and loader stay `mod-playerbots` /
+`Addmod_playerbotsScripts`.
 
 ## What this is
 
-The playerbots module for **LegionCore-Reforged 7.3.5** (`Brytenwally/LegionCore-Reforged`),
+The playerbots module for **DemonCore 7.3.5** (`DemonCore/DemonCore`),
 built into the core from `modules/mod-playerbots`. The project-wide notes, rules and the step
 plan live in the core's `CLAUDE.md`; read it first.
 
@@ -55,7 +63,7 @@ come first.
 
 ## Bot lifecycle (plan step 2, done 2026-11-02)
 
-- Core API (LegionCore-Reforged `WorldSession`): `CreateBotSession(accountId, accountName,
+- Core API (DemonCore `WorldSession`): `CreateBotSession(accountId, accountName,
   SEC_PLAYER, expansion, locale)` -> `WorldSessionPtr` (socketless, `IsBot()`, not in
   `World::m_sessions`); `LoginBot(guid)` starts the login; `LogoutBot()` logs out (saved).
   The core answers logins/teleports for bots inside `WorldSession::Update`.
@@ -210,12 +218,12 @@ All run on the bot's map thread; teammates come from `GroupMembersOnMap` (group 
   (attack + chase, melee or at range), `Disengage`.
 - Owner's decisions for them (2026-11-03, details in the core's `CLAUDE.md`): no tank threat
   bonus; talents learned automatically on every bot, alts included, but only into empty rows.
-- Compiled in the container against the core (scripts PCH), and on Windows in LegionCore-Build
+- Compiled in the container against the core (scripts PCH), and on Windows in DemonCore-Build
   run #15 (core `77189b3` + `092a80c`), 2026-11-03.
 
 ## Combat (plan steps 4.1 + 4.2, 2026-11-05)
 
-Built on Windows in LegionCore-Build run #17 (core `1da7859` + `8599f44`); **works on the owner's
+Built on Windows in DemonCore-Build run #17 (core `1da7859` + `8599f44`); **works on the owner's
 server** (see Status, 2026-11-05).
 
 - `PlayerbotAI::UpdateCombat` every 250 ms on the bot's thread (before follow; `UpdateFollow` does
@@ -551,7 +559,7 @@ Owner's request: `.playerbots self`, dungeon finder (RDF) support, formations fr
 - **Group chat** (owner, build #24: "all kinds of group chat"): party, party leader, raid, raid leader, raid
   warning, instance (= battleground on Legion) chat; the bot accepts the message's group when it is its group
   or its original group (in a battleground `/p` names the original party, `GetGroup()` is the battleground's).
-- **Dungeon finder**, core commit "Add LFG accessors for modules" (LegionCore-Reforged): `LFGMgr::
+- **Dungeon finder**, core commit "Add LFG accessors for modules" (DemonCore): `LFGMgr::
   GetQueueIds(guid)` (PlayerDungeons), `GetRoleCheckRoles(gguid, guid, roles)` (a running role check,
   state INITIALITING), `GetPendingProposal(guid)` (a proposal waiting for his answer). This core keeps LFG
   state per **queue id** (`PlayersStore[guid][queueId]`, queue id = the dungeon's), and those stores are
@@ -884,7 +892,7 @@ items by hand instead).
 ## Loot rolls and equipping from the bags (2026-11-05, untested)
 
 Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a 5% threshold.
-- Core commit "Add pending loot rolls accessor for modules" (LegionCore-Reforged): `Group::GetPendingRolls(member)`
+- Core commit "Add pending loot rolls accessor for modules" (DemonCore): `Group::GetPendingRolls(member)`
   = rolls of live loot (`GetValidRollLoots`) whose vote for him is `NOT_EMITED_YET` (aoe slot, item id, bonus
   lists, vote mask). The bot votes with `Group::CountRollVote(bot, aoeSlot, choice)` on its own thread, as
   `WorldSession::HandleLootRoll` does (the roll list is private, there was no other way to see it).
@@ -907,7 +915,7 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
 ## Status
 
 - 2026-11-01: skeleton (loader, config, startup log line). Compiles and links into the
-  Windows worldserver (LegionCore-Build run #3, which now includes this module by default).
+  Windows worldserver (DemonCore-Build run #3, which now includes this module by default).
   Verified on the owner's server 2026-11-02: `[mod-playerbots] Module loaded (disabled)`. 
 - 2026-11-02: bot lifecycle (see above) on the core's bot sessions. **Verified on the owner's
   server** (build #5, core `b1befd3` + `c77aa64`): add, alt bot beside its player, summon, far
@@ -999,5 +1007,5 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
 
 Linux syntax check against the core: see "Building" in the core's `CLAUDE.md` (clone this repo
 into the core's `modules/mod-playerbots`, configure, `make` single objects in
-`src/server/scripts`). Windows: LegionCore-Build with `with_playerbots` on. No server or
+`src/server/scripts`). Windows: DemonCore-Build with `with_playerbots` on. No server or
 database in the cloud container: runtime behaviour is untested there.

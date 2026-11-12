@@ -1,12 +1,12 @@
-# mod-playerbots (LegionCore-Reforged 7.3.5)
+# mod-playerbots (DemonCore 7.3.5)
 
-Playerbots for **LegionCore-Reforged** (World of Warcraft Legion 7.3.5, build 26972): a port of the
+Playerbots for **DemonCore** (World of Warcraft Legion 7.3.5, build 26972): a port of the
 [AzerothCore playerbots](https://github.com/mod-playerbots/mod-playerbots) (3.3.5), by way of
 [SkyFire-playerbots](https://github.com/Brytenwally/SkyFire-playerbots) (5.4.8). The goal is the AzerothCore
 module's feature set, as close to 1:1 as Legion allows, rewritten for this core (128-bit guids, map threads,
 specializations, Legion spells and content). See [Comparison and roadmap](#comparison-with-azerothcore-playerbots).
 
-Needs LegionCore-Reforged with its module system and bot hooks: bot sessions
+Needs DemonCore with its module system and bot hooks: bot sessions
 (`WorldSession::CreateBotSession`), the whisper hook, and the dungeon finder / loot roll / kick vote accessors.
 
 ## Status
@@ -213,9 +213,9 @@ Clone into the core's `modules/` folder under this exact name (the folder name d
 loader function, `Addmod_playerbotsScripts`):
 
 ```sh
-git clone https://github.com/Brytenwally/LegionCore-Playerbots.git modules/mod-playerbots
+git clone https://github.com/DemonCore/DemonCore-Playerbots.git modules/mod-playerbots
 ```
 
 Re-run CMake and build. `playerbots.conf.dist` lands next to the worldserver; copy it to
 `playerbots.conf` to change settings. Windows builds:
-[LegionCore-Build](https://github.com/Brytenwally/LegionCore-Build) (`with_playerbots`).
+[DemonCore-Build](https://github.com/DemonCore/DemonCore-Build) (`with_playerbots`).
