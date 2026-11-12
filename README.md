@@ -213,9 +213,9 @@ Clone into the core's `modules/` folder under this exact name (the folder name d
 loader function, `Addmod_playerbotsScripts`):
 
 ```sh
-git clone https://github.com/DemonCore/DemonCore-Playerbots.git modules/mod-playerbots
+git clone https://github.com/DemonCore-Legion/DemonCore-Playerbots.git modules/mod-playerbots
 ```
 
 Re-run CMake and build. `playerbots.conf.dist` lands next to the worldserver; copy it to
 `playerbots.conf` to change settings. Windows builds:
-[DemonCore-Build](https://github.com/DemonCore/DemonCore-Build) (`with_playerbots`).
+[DemonCore-Build](https://github.com/DemonCore-Legion/DemonCore-Build) (`with_playerbots`).

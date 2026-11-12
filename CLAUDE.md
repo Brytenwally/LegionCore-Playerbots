@@ -5,15 +5,15 @@ anything future sessions need, in the same commit as the change.
 
 ## Naming (owner, 2026-11-12)
 
-The project is **DemonCore** (GitHub organization `DemonCore`): this module is `DemonCore/DemonCore-Playerbots` (was
-`Brytenwally/LegionCore-Playerbots`), the core `DemonCore/DemonCore` (was `Brytenwally/LegionCore-Reforged`), the build
-`DemonCore/DemonCore-Build` (was `Brytenwally/LegionCore-Build`). Mentions of the **LegionCore-7.3.5** fork (LegionBotAI) and of
+The project is **DemonCore** (GitHub organization `DemonCore-Legion`): this module is `DemonCore-Legion/DemonCore-Playerbots` (was
+`Brytenwally/LegionCore-Playerbots`), the core `DemonCore-Legion/DemonCore` (was `Brytenwally/LegionCore-Reforged`), the build
+`DemonCore-Legion/DemonCore-Build` (was `Brytenwally/LegionCore-Build`). Mentions of the **LegionCore-7.3.5** fork (LegionBotAI) and of
 upstream LegionCore - Reforged keep their names: they are other projects. The module folder and loader stay `mod-playerbots` /
 `Addmod_playerbotsScripts`.
 
 ## What this is
 
-The playerbots module for **DemonCore 7.3.5** (`DemonCore/DemonCore`),
+The playerbots module for **DemonCore 7.3.5** (`DemonCore-Legion/DemonCore`),
 built into the core from `modules/mod-playerbots`. The project-wide notes, rules and the step
 plan live in the core's `CLAUDE.md`; read it first.
 
