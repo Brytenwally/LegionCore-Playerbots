@@ -1,0 +1,11 @@
+## Interface: 70300
+## Title: SquidBots Lite
+## Notes: A thin bar of bot orders and role badges on the party frames - DemonCore-Playerbots (7.3.5)
+## Notes-frFR: Une barre fine d'ordres aux bots et rôles sur les cadres de groupe - DemonCore-Playerbots (7.3.5)
+## Version: 4.0.0
+## Author: CoA Bots team, SkyFire port by Brytenwally, DemonCore 7.3.5 port
+## X-License: GPL-2.0
+## X-Website: https://github.com/DemonCore-Legion/DemonCore-Playerbots
+## SavedVariables: SquidBotsLiteDB
+## SavedVariablesPerCharacter: SquidBotsLiteCharDB
+SquidBotsLite.lua

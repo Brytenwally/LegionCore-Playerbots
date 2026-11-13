@@ -352,6 +352,27 @@ server** (see Status, 2026-11-05).
 - Not yet: tank threat bonus (owner: no), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot (talents and formations: see their sections).
 
+## SquidBots Lite addon (`addon/`, 2026-11-13, untested)
+
+Owner's request: port `Brytenwally/squidbots-addon` (5.4.8, for SkyFire-playerbots; read-only reference) to the 7.3.5
+client. The port lives here, in `addon/SquidBotsLite` (Interface 70300), next to the orders it sends; `addon/README.md` is
+its user guide. Rules kept from the original: **every order it sends must exist in this module** (`PlayerbotAI::HandleOrder`,
+`CombatStrategies` / `NonCombatStrategies`, `.playerbots add|remove|list`), and **no server change just for the addon**.
+- Order mapping: Active = `assist full` (our `aggressive` pulls, unlike SkyFire's); Dungeon = `co -aggressive,+avoidaoe`,
+  `assist full`, `follow`; Farm = `co +aggressive`, `nc +loot,+rest,+follow`; sell = `sell gray`; quests nearby = `quests
+  available`; Revive = `summon` **in party chat** (a whispered summon does not revive); role orders (`@tank` ...) = a whisper
+  to each member of that role; Switch role = `talents <1-4>` (spec names from `GetSpecializationInfoForClassID`); tanks get
+  `player tank` / `bot tank`. Dropped: `accept`, `rti`, healer damage, `.playerbots init`.
+- Server answers parsed (keep these texts stable, or update the addon with them): `Bot 'X' logged in.`, `'X' is already a
+  bot.`, `Logging out bot 'X'.`, `'X' is not a bot.`, `N bot(s):` + `  Name - state` lines / `No bots.` (list); quests
+  `--- Incompleted quests ---`, `[Title] - 3/8 label, ...`, `--- Completed quests ---`, `Quests: n / 25 (...)` (end);
+  strategy answers start with `Combat strategies` / `Non-combat strategies` (hidden for a few seconds after the addon's own
+  co / nc orders).
+- Roles: party role (dungeon finder groups), else an inspect of members without one (`NotifyInspect`, `INSPECT_READY`,
+  `GetInspectSpecialization`, `GetSpecializationRoleByID`; ranged = spec ids 62-64, 102, 253, 254, 258, 262, 265-267), one at a
+  time, never while the inspect window is open.
+- Check: `luac5.1 -p` and `luacheck --std lua51 --no-max-line-length --no-unused-args --globals <WoW API>`: 0 warnings.
+
 ## Avoid AoE (2026-11-13, untested)
 
 Owner's request: mod-playerbots' "avoid aoe" strategy, always on. `src/combat/BotAvoidAoe.*` (reference
