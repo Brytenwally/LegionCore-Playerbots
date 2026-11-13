@@ -107,6 +107,15 @@ come first.
     (`RemoveFromGroup`). And `CheckPlayerlessGroup` (every 60 s, cheap: member list + `PlayerbotMgr::IsBot` +
     an existence lookup per member): two checks in a row with no online non-bot player in the group (a player
     has a minute to come back) -> a random bot is dismissed, an alt leaves.
+  - **Random bots kept their master after a kick or a broken-up group** (owner, build #44: "some bots still don't
+    reset to their base level ... and remain active"). The owner / group rule above dismisses only a bot that has
+    been in a group with its master (`_wasWithOwner`) and did not leave by order (`_leftByOrder`): a fill bot matched
+    without its master, a random bot told to `leave`, and similar paths kept a master and no group forever. Safety
+    net `CheckUngrouped`: a random bot with a master that has been in a group since its AI was made
+    (`_everGrouped`), now in none for 30 s and waiting for nothing (no dungeon finder / battleground queue, no
+    creator invite, join teleport, pending master or battleground fill on the way) is dismissed (`it has a master
+    but no group`). A bot a GM added or created and has not invited yet keeps waiting. **Rule: every random bot
+    state with a master must end in a group or in a dismissal; check new paths against `CheckUngrouped`.**
 - GM commands: `.playerbots add <name>`, `remove <name>`, `removeall`, `list`. Need
   `Playerbots.Enable = 1`. Any character of any account; must not be online.
 
@@ -781,7 +790,12 @@ Vengeance) keep the module's own lists, to be done by hand later.
   list: action text on Target`.
 - Out of combat (`UpdatePrecombat`, every 2 s, not resting / looting / mounted): the `precombat` list's
   positive self spells not already up, `summon_pet` (hunter Call Pet 1, warlock `Summon <name>`) and
-  `apply_poison` (`<lethal> Poison`); no `stealth` / `prowl` while following.
+  `apply_poison` (`<lethal> Poison`); no `stealth` / `prowl` while following. **Not spells with a cooldown of
+  60 s or more** (build #44: every demon hunter cast Metamorphosis at login on GM Island), and a precombat spell is
+  not cast again for its duration (2 min without one; `State::precombatCasts`, cleared nowhere: the timer runs out):
+  **Elemental's Totem Mastery was cast every 2 s** (owner, build #44) since its aura check looks for an aura named
+  "Totem Mastery" while the spell only summons totems whose buffs have other names. **Rule: "not already up" by
+  aura name fails for summons; any out-of-combat repeat needs a time limit too.**
 - Talents: `FillTalents` takes the profile's `talents=` digit for a row (column 1-3; 0 = the old name table);
   startup logs each profile's talents by name (`SimC talents of X (spec N): 1302002: ...`).
 - Config: `Playerbots.Rotation.SimC` (1), `Playerbots.Rotation.Directory` ("playerbots_apl").
@@ -1074,6 +1088,10 @@ Owner's request; SkyFire's rules (`HandleLootRolls` / `EquipBagUpgrades`) with a
   Battleground tactics (same build): **rudimentary but working**, a solid base; their logic is to be improved later.
   The place-for-a-player and top-up rules are **not testable yet**: they need a second human player (to be tested once
   the project is public).
+- 2026-11-13, owner's report on build #44: some random bots still kept their master, level and gear after a kick or
+  after their group broke up (safety net `CheckUngrouped` added, see "Bot lifecycle"); Elemental shamans cast Totem
+  Mastery every 2 s out of combat (precombat time limit added, see "SimC rotations"). The other features of the
+  build (avoidaoe, party roles, bags and trade) not reported yet.
 - 2026-11-07, owner's test of build #33 (maintenance, riding, mounts): **works**: `maintenance` fully, party bots mount
   with their leader, random bots start with the riding of their level, allied races get their racial mounts.
   **Problem**: following a flying leader is messy (core follow plans on the ground mesh); rewritten in the commit after

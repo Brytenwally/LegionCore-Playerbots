@@ -125,7 +125,7 @@ When you log out, the bots of your account (your alts) log out with you.
 
 ## Comparison with AzerothCore playerbots
 
-Status as of 2026-11-13: build #33 tested (`maintenance`, riding, mounts); the flying follow, the `sell` order and `avoidaoe` built after it. **Verified** = tested on the owner's server and working. **Built** = written
+Status as of 2026-11-13: build #44 reported on (random bots not always dismissed, Totem Mastery spam: both fixed after it); avoidaoe, party roles, bags and trade still waiting for their test. **Verified** = tested on the owner's server and working. **Built** = written
 and compiling, waiting for its in-game test. **Missing** = not started; the roadmap below orders them. AzerothCore's
 code is a 3.3.5 module with its own strategy / trigger / action / value engine; here the same behaviours are rewritten
 directly for Legion, so the comparison is by feature, not by file.

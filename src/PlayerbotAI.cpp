@@ -157,6 +157,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
         UpdateJoinTeleport(bot);
     CheckOwnerGroup(bot, diff);
     CheckPlayerlessGroup(bot, diff);
+    CheckUngrouped(bot, diff);
 
     // owner's decision: talents are learned automatically, alts included, into empty rows only
     _talentTimer += diff;
@@ -3490,6 +3491,31 @@ void PlayerbotAI::LootCorpse(Player* bot, Creature* corpse)
 
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' loots %s: %u item(s) taken, %u below the minimum quality left.",
         bot->GetName(), corpse->GetName(), taken, left);
+}
+
+// Owner's report (build #44): some random bots kept their master, level and gear after a kick or after their group
+// broke up. The owner / group rules only dismiss a bot that has been in a group with its master and did not leave
+// by order; a fill bot matched without its master, a bot told to "leave" and other paths kept a master with no
+// group forever. Safety net: a random bot with a master that has been in a group, out of any group for 30 s and
+// waiting for nothing (no dungeon finder or battleground queue, no invite or setup on the way) is dismissed.
+void PlayerbotAI::CheckUngrouped(Player* bot, uint32 diff)
+{
+    uint32 const Limit = 30000;
+    if (bot->GetGroup())
+        _everGrouped = true;
+    // a bot added or created by a GM and not invited yet keeps waiting for its invite
+    if (!_everGrouped || !_randomBot || _master.IsEmpty() || bot->GetGroup() || bot->InBattleground() || bot->InArena() ||
+        bot->InBattlegroundQueue() || !_inviteCreator.IsEmpty() || _joinTeleport || !_pendingMaster.IsEmpty() ||
+        (_bgFill && !_bgEntered) || !sLFGMgr->GetQueueIds(bot->GetGUID()).empty())
+    {
+        _ungroupedTime = 0;
+        return;
+    }
+    _ungroupedTime += diff;
+    if (_ungroupedTime < Limit)
+        return;
+    _ungroupedTime = 0;
+    Dismiss(bot, "it has a master but no group");
 }
 
 // Owner's request (build #26): once a minute a bot looks at its group; two checks in a row (so a player has a

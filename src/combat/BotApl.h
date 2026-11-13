@@ -59,6 +59,9 @@ namespace BotApl
         bool burnPhase = false;                         // Arcane's start/stop_burn_phase
         uint32 burnStart = 0;
         uint32 precombatTimer = 0;
+        // out of combat: spell id -> getMSTime it was cast, for spells that leave no aura of their own name on the
+        // bot (Totem Mastery summons totems): not cast again for the spell's duration (2 minutes without one)
+        std::map<uint32, uint32> precombatCasts;
     };
 
     // Startup: parses the built-in profiles and the .simc files of directory (when it exists; those replace the

@@ -290,6 +290,9 @@ private:
     uint32 _groupCheckTimer = 0;                            // the playerless group check (every minute)
     uint32 _playerlessChecks = 0;
     void CheckPlayerlessGroup(Player* bot, uint32 diff);
+    uint32 _ungroupedTime = 0;                              // a random bot with a master but no group: ms so far
+    bool _everGrouped = false;                              // has been in a group since this AI was made
+    void CheckUngrouped(Player* bot, uint32 diff);
     bool _wasWithOwner = false;                             // has been in a group with its master
     bool _leftByOrder = false;                              // the "leave" order: no logout for that
     int32 _groupLogoutTimer = -1;                           // ms until logout, -1 = none

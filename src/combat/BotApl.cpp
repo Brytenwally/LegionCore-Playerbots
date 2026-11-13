@@ -1458,6 +1458,18 @@ namespace
                 return false;
             if (action.kind != A::SummonPet && FindAura(bot, spellName, ObjectGuid::Empty))
                 return false;
+            // long cooldowns (Metamorphosis, Pillar of Frost...) belong to a pull, not to walking around
+            if (info->Cooldowns.RecoveryTime >= 60000 || info->Cooldowns.CategoryRecoveryTime >= 60000)
+                return false;
+            // a buff whose aura has another name (Totem Mastery: the totems' buffs) would be recast every check
+            auto cast = ctx.state->precombatCasts.find(id);
+            if (cast != ctx.state->precombatCasts.end())
+            {
+                int32 const duration = info->GetMaxDuration();
+                uint32 const wait = duration > 0 ? uint32(duration) : 120000;
+                if (getMSTimeDiff(cast->second, ctx.now) < wait)
+                    return false;
+            }
         }
 
         if (action.lineCd > 0.0)
@@ -1488,6 +1500,8 @@ namespace
             ctx.state->lastCasts.pop_back();
         if (action.lineCd > 0.0)
             ctx.state->lineCooldowns[action.id] = ctx.now;
+        if (precombat)
+            ctx.state->precombatCasts[id] = ctx.now;
         fired = std::string(info->SpellName ? info->SpellName : "?") + " (" + std::to_string(id) + "), " +
             (action.list.empty() ? std::string("actions") : action.list) + ": " + action.raw;
         return true;
