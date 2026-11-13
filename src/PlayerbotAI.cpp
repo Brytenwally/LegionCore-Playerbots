@@ -170,6 +170,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     {
         _lfgTimer = 0;
         UpdateLfg(bot);
+        UpdatePartyRole(bot);
         _leadTimer += LfgCheckInterval;
         if (_leadTimer >= 3000)
         {
@@ -2508,6 +2509,27 @@ void PlayerbotAI::UpdateLfg(Player* bot)
         }
     TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' accepts dungeon finder proposal %u.", bot->GetName(), proposal);
     sLFGMgr->UpdateProposal(response, guid);
+}
+
+// A bot in an ordinary party or raid takes the group role of its specialization (tank / healer / damage), like a player
+// picking his role on his portrait: a queued CMSG_SET_ROLE (SetRole::Read: int8 PartyIndex, guid, int32 Role), so the
+// core's HandleSetRole broadcasts the change (SMSG_ROLE_CHANGED_INFORM) and stores it. Dungeon finder groups keep the
+// role the queue gave; battleground raids have none. Checked every second; a changed spec changes the role.
+void PlayerbotAI::UpdatePartyRole(Player* bot)
+{
+    Group* group = bot->GetGroup();
+    if (_selfBot || !group || group->isLFGGroup() || group->isBGGroup() || group->isBFGroup() || !group->IsMember(bot->GetGUID()))
+        return;
+
+    uint8 const role = LfgRoleOf(bot);
+    if (group->GetLfgRoles(bot->GetGUID()) == role)
+        return;
+
+    WorldPacket* packet = new WorldPacket(CMSG_SET_ROLE, 1 + 18 + 4);
+    *packet << int8(0);
+    *packet << bot->GetGUID();
+    *packet << int32(role);
+    bot->GetSession()->QueuePacket(packet);
 }
 
 void PlayerbotAI::PassLfgLead(Player* bot)

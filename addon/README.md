@@ -32,7 +32,8 @@ member of that role.
 ## On your party frames
 
 A role icon on each member's party frame (and raid-style frames; `/sbl raidframes off` to stop). The role is the party
-role (set in dungeon finder groups), else the role of the specialization an **inspect** finds (`/sbl roles off` to stop).
+role, which the bots take from their specialization when grouped; for anyone without one, the role of the specialization
+an **inspect** finds (`/sbl roles off` to stop).
 Click the icon for that bot alone: follow, stay, attack my target, come to me, best gear, maintenance, sell, its quests,
 **switch specialization** (`talents 1-4`), make it the leader, remove from group; a tank adds **I tank** (`player tank`)
 and **It tanks** (`bot tank`).

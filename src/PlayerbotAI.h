@@ -156,6 +156,8 @@ private:
     // a bot leading a dungeon finder group gives the lead to a real player of it (owner, build #28: the core offers
     // "find another player" to the leader only, and a bot leader's offer reached nobody)
     void PassLfgLead(Player* bot);
+    // owner's request (2026-11-13), as SkyFire's bots: the party role (tank / healer / damage on the frames) follows the spec
+    void UpdatePartyRole(Player* bot);
     uint32 _leadTimer = 0;
     // battlegrounds: accepts invitations (party bots queued with their group, fill bots), then in a battleground its
     // tactics, death and leaving (BotBattleground::Update)

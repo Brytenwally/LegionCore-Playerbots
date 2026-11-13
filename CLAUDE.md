@@ -352,6 +352,16 @@ server** (see Status, 2026-11-05).
 - Not yet: tank threat bonus (owner: no), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot (talents and formations: see their sections).
 
+## Party roles (2026-11-13, untested)
+
+Owner's request, as SkyFire's bots: a bot in an ordinary party or raid takes the group role of its specialization (tank /
+healer / damage icon on the party and raid frames). `PlayerbotAI::UpdatePartyRole`, every second with `UpdateLfg`: when
+`Group::GetLfgRoles` differs from `LfgRoleOf` (the spec role), a queued `CMSG_SET_ROLE` (int8 PartyIndex 0, guid, int32
+role), so the core's `HandleSetRole` broadcasts `SMSG_ROLE_CHANGED_INFORM` and stores the role (`Group::SetLfgRoles`, also in
+the database). Not in dungeon finder groups (their role is the queue's), battleground / battlefield raids, or for self-bots;
+alts too (nothing on the character changes). A spec switch (`talents <spec>`) changes the role at the next check. The
+SquidBots Lite addon reads it through `UnitGroupRolesAssigned` (its inspect stays as a fallback).
+
 ## SquidBots Lite addon (`addon/`, 2026-11-13, untested)
 
 Owner's request: port `Brytenwally/squidbots-addon` (5.4.8, for SkyFire-playerbots; read-only reference) to the 7.3.5

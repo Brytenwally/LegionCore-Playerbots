@@ -163,6 +163,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Area | Feature | AzerothCore equivalent |
 | --- | --- | --- |
 | Loot | Need / greed / pass rolls by upgrade; equip upgrades from the bags | `LootRoll`, auto-equip upgrades |
+| Group | Party role from the spec (tank / healer / damage icons on the frames) | bots set their role |
 | Tools | SquidBots Lite client addon for 7.3.5 (`addon/`): order bar, role icons on party frames, My alts, bot quest log | SquidBots Lite (3.3.5 / 5.4.8) |
 | Combat | `avoidaoe`, always on: in a fight, step out of enemy ground effects (dynamic object auras, Legion area triggers, damaging traps, trigger creatures), radius limit and whitelist | `avoid aoe` strategy (`AvoidAoeAction`) |
 | Battlegrounds | Party bots enter with their leader; bots give a later player their place; top-ups after a refusal (needs a second human player: to be tested once the project is public) | `BattleGroundJoin` |
