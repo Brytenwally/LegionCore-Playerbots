@@ -92,6 +92,8 @@ public:
     // co avoidaoe: Playerbots.AvoidAoe.* (radius limit, step, never-avoided spells, whisper)
     BotAvoidAoe::Options const& GetAvoidAoeOptions() const { return _avoidAoe; }
     bool GetAvoidAoeTell() const { return _avoidAoeTell; }
+    // Playerbots.Trade.Enable: the "t" order and answering trades
+    bool IsTradeEnabled() const { return _tradeEnabled; }
 
     // ".playerbots self" (player's thread): turns the AI on or off for his own character; reply = what to tell him
     bool ToggleSelfBot(Player* player, std::string& reply);
@@ -374,6 +376,7 @@ private:
     StrategyOptions _strategy;
     BotAvoidAoe::Options _avoidAoe;
     bool _avoidAoeTell = false;
+    bool _tradeEnabled = true;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

@@ -175,6 +175,13 @@ private:
     void UpdateBagEquip(Player* bot);
     // "sell <gray|*|vendor|quality [all]|item links|name>" (AzerothCore's SellAction), at a vendor within reach
     void SellOrder(Player* bot, OrderSender const& sender, std::string const& args);
+    // AzerothCore's "c" (bag inspection) and "t" (trade) orders, and the answer to a trade someone opens (BotTrade.h)
+    void InventoryOrder(Player* bot, OrderSender const& sender, std::string const& args);
+    void TradeOrder(Player* bot, OrderSender const& sender, std::string const& args);
+    void UpdateTrade(Player* bot);
+    ObjectGuid _tradeTrader;                                // the trade under way, as last seen
+    bool _tradeBegun = false;                               // its window opened on our side (CMSG_BEGIN_TRADE)
+    bool _tradeOpenedByMe = false;                          // the next trade is one the bot itself opened ("t")
     // gray items sold as soon as the bot stands at a vendor (Playerbots.Sell.AutoGray)
     void UpdateAutoSell(Player* bot);
     bool EquipFromBag(Player* bot, Item* item, BotGear::Comparison const& comparison);

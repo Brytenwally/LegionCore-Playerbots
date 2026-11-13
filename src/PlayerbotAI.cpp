@@ -28,6 +28,8 @@
 #include "BotSell.h"
 #include "BotFormation.h"
 #include "Chat.h"
+#include "BotTrade.h"
+#include "TradeData.h"
 #include "GameTime.h"
 #include "LFGMgr.h"
 #include "LFGPackets.h"
@@ -200,6 +202,7 @@ void PlayerbotAI::Update(Player* bot, uint32 diff)
     if (_corpseTimer >= 500)
     {
         _corpseTimer = 0;
+        UpdateTrade(bot);
         UpdateLoot(bot);
     }
 
@@ -653,7 +656,7 @@ void PlayerbotAI::HandleWhisper(Player* bot, OrderSender const& sender, std::str
         return;
 
     if (!HandleOrder(bot, sender, text))
-        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, maintenance, sell <gray|vendor|quality [all]|item>, quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
+        Say(bot, sender.guid, "Orders I know: follow, stay, summon, leave, attack, passive, assist [full|defend|passive], formation [name], co ?|+name|-name, nc ?|+name|-name, player tank, bot tank, talents [spec], autogear, maintenance, sell <gray|vendor|quality [all]|item>, c [filter], t [items] [money], quests [all|in|co|summary|available], quest take <name>, quest complete <name>.");
 }
 
 void PlayerbotAI::HandlePartyChat(Player* bot, OrderSender const& sender, ObjectGuid const& group, std::string const& text)
@@ -716,6 +719,25 @@ bool PlayerbotAI::HandleOrder(Player* bot, OrderSender const& sender, std::strin
     if (order == "autogear")
     {
         AutoGearOrder(bot, sender);
+        return true;
+    }
+
+    // AzerothCore's "c" / "items" / "inventory" / "inv" [filter]: what the bags hold
+    for (char const* word : { "c", "items", "inventory", "inv" })
+    {
+        std::string const w = word;
+        if (order == w || order.rfind(w + " ", 0) == 0)
+        {
+            InventoryOrder(bot, sender, order == w ? std::string() : text.substr(text.find(' ') + 1));
+            return true;
+        }
+    }
+
+    // AzerothCore's "t" / "trade" [items] [money]: open a trade with the owner and put those in it
+    if (order == "t" || order == "trade" || order.rfind("t ", 0) == 0 || order.rfind("trade ", 0) == 0)
+    {
+        size_t const space = text.find(' ');
+        TradeOrder(bot, sender, space == std::string::npos ? std::string() : text.substr(space + 1));
         return true;
     }
 
@@ -2826,6 +2848,137 @@ void PlayerbotAI::UpdateLootRolls(Player* bot)
             choice == ROLL_NEED ? "" : ": ", choice == ROLL_NEED ? "" : why);
         // as WorldSession::HandleLootRoll, on the voter's own thread
         group->CountRollVote(bot, roll.aoeSlot, choice);
+    }
+}
+
+// ---- Bag inspection and trading (AzerothCore's TellItemCountAction, TradeAction, TradeStatusAction) ------------
+
+// "c [filter]": the bag items matching the filter, one whisper per kind, then the money
+void PlayerbotAI::InventoryOrder(Player* bot, OrderSender const& sender, std::string const& args)
+{
+    for (std::string const& line : BotTrade::InventoryLines(bot, args))
+        Say(bot, sender.guid, line);
+}
+
+// "t [items] [money]": the bot opens a trade with its owner (who must stand next to it) and puts the matching bag
+// items (up to a trailing count, at most the six trade slots) and the money in it. An order, so allowed on alts.
+void PlayerbotAI::TradeOrder(Player* bot, OrderSender const& sender, std::string const& args)
+{
+    if (!sPlayerbotMgr->IsTradeEnabled())
+    {
+        Say(bot, sender.guid, "Trading is disabled.");
+        return;
+    }
+
+    Player* owner = ObjectAccessor::GetPlayer(*bot, sender.guid);
+    if (!owner)
+    {
+        Say(bot, sender.guid, "Come next to me to trade.");
+        return;
+    }
+
+    TradeData* trade = bot->GetTradeData();
+    if (trade && trade->GetTrader() != owner)
+    {
+        Say(bot, sender.guid, "I'm trading with someone else.");
+        return;
+    }
+    if (!trade)
+    {
+        _tradeOpenedByMe = true;
+        if (!BotTrade::Initiate(bot, owner))
+        {
+            _tradeOpenedByMe = false;
+            Say(bot, sender.guid, "I can't trade with you right now (too far, dead, busy?).");
+            return;
+        }
+        // the bot opens both windows at once, as if the owner had accepted the proposal: he asked for it
+        BotTrade::Begin(bot);
+        _tradeTrader = owner->GetGUID();
+        _tradeBegun = true;
+        _tradeOpenedByMe = false;
+    }
+
+    std::string rest;
+    uint64 const copper = BotTrade::ParseMoney(args, rest);
+    if (copper)
+        BotTrade::SetMoney(bot, copper);
+
+    // a trailing number is how many stacks (AzerothCore's count), at most the six trade slots
+    uint32 count = TRADE_SLOT_TRADED_COUNT;
+    size_t const lastSpace = rest.rfind(' ');
+    std::string const lastWord = lastSpace == std::string::npos ? rest : rest.substr(lastSpace + 1);
+    if (!lastWord.empty() && lastWord.find_first_not_of("0123456789") == std::string::npos && lastWord.size() < 4)
+    {
+        count = std::max<uint32>(1, std::min<uint32>(uint32(std::stoul(lastWord)), TRADE_SLOT_TRADED_COUNT));
+        rest = lastSpace == std::string::npos ? std::string() : rest.substr(0, lastSpace);
+    }
+
+    if (rest.empty())
+    {
+        if (copper)
+            Say(bot, sender.guid, "Money put in the trade.");
+        return;
+    }
+
+    std::vector<Item*> const items = BotTrade::FindItems(bot, rest);
+    uint32 const put = BotTrade::PutItems(bot, items, count);
+    if (!put)
+        Say(bot, sender.guid, items.empty() ? "I have nothing like that." : "I can't trade that (soulbound, or no free trade slot).");
+    else
+        Say(bot, sender.guid, "Put " + std::to_string(put) + " item(s) in the trade.");
+}
+
+// The answer to a trade (AzerothCore's TradeStatusAction): a trade opened by the owner or a group member is begun
+// (and the bot shows its bags), and accepted once the other side has accepted; anyone else is turned down. The core
+// sends the trade statuses to the bot's session, which has no client, so the state is read every half second.
+void PlayerbotAI::UpdateTrade(Player* bot)
+{
+    TradeData* trade = bot->GetTradeData();
+    if (!trade || _selfBot)
+    {
+        _tradeTrader.Clear();
+        _tradeBegun = false;
+        return;
+    }
+
+    Player* trader = trade->GetTrader();
+    if (!trader || !trader->IsInWorld() || trader->GetMap() != bot->GetMap())
+        return;                                             // the core cancels a trade whose partner left
+
+    if (_tradeTrader != trader->GetGUID())
+    {
+        _tradeTrader = trader->GetGUID();
+        _tradeBegun = _tradeOpenedByMe;
+    }
+
+    Group* group = bot->GetGroup();
+    bool const allowed = IsMaster(trader->GetGUID(), trader->GetSession()->GetAccountId()) ||
+        (group && group->IsMember(trader->GetGUID()));
+    if (!allowed || !sPlayerbotMgr->IsTradeEnabled())
+    {
+        Say(bot, trader->GetGUID(), allowed ? "Trading is disabled." : "I'm kind of busy now.");
+        BotTrade::Cancel(bot);
+        _tradeTrader.Clear();
+        return;
+    }
+
+    if (!_tradeBegun)
+    {
+        BotTrade::Begin(bot);
+        _tradeBegun = true;
+        for (std::string const& line : BotTrade::InventoryLines(bot, std::string()))
+            Say(bot, trader->GetGUID(), line);
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' trades with %s.", bot->GetName(), trader->GetName());
+        return;
+    }
+
+    TradeData* his = trader->GetTradeData();
+    if (his && his->IsAccepted() && !trade->IsAccepted() && !trade->IsInAcceptProcess())
+    {
+        BotTrade::Accept(bot);
+        if (!bot->GetTradeData())
+            TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' completed a trade with %s.", bot->GetName(), trader->GetName());
     }
 }
 

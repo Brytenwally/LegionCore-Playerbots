@@ -163,6 +163,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Area | Feature | AzerothCore equivalent |
 | --- | --- | --- |
 | Loot | Need / greed / pass rolls by upgrade; equip upgrades from the bags | `LootRoll`, auto-equip upgrades |
+| Items | Bag inspection (`c` / `items` / `inventory` [filter]) and trading (`t` [items] [count] [money]; trades opened by the owner or a group member are begun and accepted) | `TellItemCount`, `Trade`, `TradeStatus` |
 | Group | Party role from the spec (tank / healer / damage icons on the frames) | bots set their role |
 | Tools | SquidBots Lite client addon for 7.3.5 (`addon/`): order bar, role icons on party frames, My alts, bot quest log | SquidBots Lite (3.3.5 / 5.4.8) |
 | Combat | `avoidaoe`, always on: in a fight, step out of enemy ground effects (dynamic object auras, Legion area triggers, damaging traps, trigger creatures), radius limit and whitelist | `avoid aoe` strategy (`AvoidAoeAction`) |
@@ -188,7 +189,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Combat | Hand-made lists for the 8 specs without a SimC profile (most healers, Protection Warrior, Vengeance) | class strategies | |
 | Pets | Hunter taming and pet management, warlock pets beyond the precombat summon, pet talents | `Tame`, pet strategies | |
 | Movement | Flight paths, following across maps on its own | `Taxi` | |
-| Items | Vendors (buy, repair), bank, mail, trade with players, use / open / destroy items by order | `Sell`, `Buy`, `RepairAll`, `Bank`, `Mail`, `Trade` | |
+| Items | Vendors (buy, repair), bank, mail, use / open / destroy items by order | `Buy`, `RepairAll`, `Bank`, `Mail` | |
 | Items | Consumables (flasks, food buffs), bonus IDs and `Game.Patch` item level tiers, scaling enchants | maintenance consumables | |
 | Legion | Artifact weapons and traits, relics, PvP talents, class halls | none | Legion only |
 | Professions | Crafting, gathering, fishing | `SetCraft`, `Fishing`, gathering | |

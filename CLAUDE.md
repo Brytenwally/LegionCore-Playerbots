@@ -352,6 +352,28 @@ server** (see Status, 2026-11-05).
 - Not yet: tank threat bonus (owner: no), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot (talents and formations: see their sections).
 
+## Bag inspection and trading (2026-11-13, untested)
+
+Owner's request: AzerothCore's `c` and trade. `src/BotTrade.*` (references `mod-playerbots/src/Ai/Base/Actions/
+TellItemCountAction.cpp`, `InventoryAction.cpp` (`parseItems`, `TellItems`), `TradeAction.cpp`, `TradeStatusAction.cpp`).
+- Orders (owner only, whisper or group chat; orders, so alts too): `c` / `items` / `inventory` / `inv` [filter]: bag items
+  (never worn ones) matching the filter, one whisper per item kind (a link, `xN`, `(soulbound)`) under a header per item class,
+  AzerothCore's sort, at most 80 kinds, then `Money: ...`. Filters: empty / `all`, item links, a quality word, `food` / `drink`,
+  `potion`, `healing potion`, `mana potion` (on-use heal / mana energize), `flask`, `elixir`, `bandage`, `quest`, `weapon`,
+  `armor`, `gear`, `gem`, `materials`, `recipe`, `consumable`, `bag`, else part of the English name.
+  `t` / `trade` [items] [count] [money]: the bot opens a trade with its owner (same map, the core's own distance checks) and,
+  as he asked for it, begins it at once (both windows open), then puts the money (`5g 20s`) and up to `count` stacks (default
+  and maximum: the six trade slots) of the matching items; not when it already trades with someone else.
+- `UpdateTrade` (every 500 ms; not self-bots): the core sends trade statuses to the bot's session, which has no client, so
+  the module reads `Player::GetTradeData`. A trade from the owner (`IsMaster`) or a member of the bot's group is begun (the bot
+  whispers its bags, as AzerothCore) and accepted once the other side has accepted (`TradeData::IsAccepted` of the trader);
+  anyone else gets "I'm kind of busy now." and a cancel. `Playerbots.Trade.Enable` (1) turns trading off.
+- Every step goes through the core's handlers with packets built on the bot's thread (`HandleInitiateTrade`,
+  `HandleBeginTrade`, `HandleSetTradeItem`, `HandleSetTradeGold`, `HandleAcceptTrade`, `HandleCancelTrade`; `NullCmsg` for
+  begin / cancel), so distance, binding (`CanBeTraded`, `IsBindedNotWith`) and bag room are the core's. The trader is on the
+  bot's map (the core's trade needs it), so his `TradeData` is read on the right thread.
+- Not ported: random bots' trade prices and discounts, crafting orders, guild tasks (AzerothCore's `CheckTrade` economics).
+
 ## Party roles (2026-11-13, untested)
 
 Owner's request, as SkyFire's bots: a bot in an ordinary party or raid takes the group role of its specialization (tank /

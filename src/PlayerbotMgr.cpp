@@ -53,6 +53,7 @@ void PlayerbotMgr::LoadConfig()
     _avoidAoe.maxRadius = std::max(1.0f, sConfigMgr->GetFloatDefault("Playerbots.AvoidAoe.MaxRadius", 15.0f));
     _avoidAoe.maxStep = std::max(2.0f, sConfigMgr->GetFloatDefault("Playerbots.AvoidAoe.MaxStep", 8.0f));
     _avoidAoeTell = sConfigMgr->GetBoolDefault("Playerbots.AvoidAoe.Tell", false);
+    _tradeEnabled = sConfigMgr->GetBoolDefault("Playerbots.Trade.Enable", true);
     _avoidAoe.whitelist.clear();
     {
         // mod-playerbots' AiPlayerbot.AoeAvoidSpellWhitelist: comma separated spell ids

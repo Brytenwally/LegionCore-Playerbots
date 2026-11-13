@@ -385,6 +385,16 @@ Playerbots.AvoidAoe.Whitelist = ""
 Playerbots.AvoidAoe.Tell = 0
 
 #
+#    Playerbots.Trade.Enable
+#        1 = bots trade (AzerothCore's "t" / "trade" order, and the answer to a trade): a trade opened by the
+#        bot's owner or a group member is begun and accepted once the other side accepts; anyone else is
+#        turned down. "t <items> [count] [money]" makes the bot open a trade with its owner and put them in.
+#        "c [filter]" (bag inspection) works either way.
+#        Default: 1
+
+Playerbots.Trade.Enable = 1
+
+#
 #    Playerbots.Aggressive.Range
 #    Playerbots.Aggressive.MaxLevelAbove
 #        co aggressive: out of combat, the bot attacks the nearest hostile creature within Range
