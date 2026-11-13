@@ -125,7 +125,7 @@ When you log out, the bots of your account (your alts) log out with you.
 
 ## Comparison with AzerothCore playerbots
 
-Status as of 2026-11-08: build #33 tested (`maintenance`, riding, mounts); the flying follow and the `sell` order built after it. **Verified** = tested on the owner's server and working. **Built** = written
+Status as of 2026-11-13: build #33 tested (`maintenance`, riding, mounts); the flying follow, the `sell` order and `avoidaoe` built after it. **Verified** = tested on the owner's server and working. **Built** = written
 and compiling, waiting for its in-game test. **Missing** = not started; the roadmap below orders them. AzerothCore's
 code is a 3.3.5 module with its own strategy / trigger / action / value engine; here the same behaviours are rewritten
 directly for Legion, so the comparison is by feature, not by file.
@@ -163,6 +163,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | Area | Feature | AzerothCore equivalent |
 | --- | --- | --- |
 | Loot | Need / greed / pass rolls by upgrade; equip upgrades from the bags | `LootRoll`, auto-equip upgrades |
+| Combat | `avoidaoe`, always on: in a fight, step out of enemy ground effects (dynamic object auras, Legion area triggers, damaging traps, trigger creatures), radius limit and whitelist | `avoid aoe` strategy (`AvoidAoeAction`) |
 | Battlegrounds | Party bots enter with their leader; bots give a later player their place; top-ups after a refusal (needs a second human player: to be tested once the project is public) | `BattleGroundJoin` |
 | Battlegrounds | PvP targeting, release and spirit healer, leave at the end | BG strategies, `ReleaseSpirit` |
 | Movement | Following a flying leader: fly flags by hand, straight flight at his height, swap to the flier on takeoff, landing beside him, walking beneath him without flying riding (build #33's flying follow was messy) | `UpdateMovementState`, SkyFire's flying follow |
@@ -181,7 +182,7 @@ directly for Legion, so the comparison is by feature, not by file.
 | PvP | Duels (accept), world PvP (attack enemy players outside battlegrounds) | `AcceptDuel`, attack enemy players | |
 | Dungeons / raids | Boss strategies | ~25 dungeon and ~20 raid strategies (3.3.5 content) | Legion dungeons and raids need their own |
 | Dungeons / raids | LFR / raid finder, scenarios, Mythic+ | LFG raids | |
-| Combat | Ground-effect dodge and fleeing, crowd control, raid target icons (`rti`), focus heal targets, healers dealing damage when idle | avoid AoE, CC, `rti`, focus heal | |
+| Combat | Fleeing, crowd control, raid target icons (`rti`), focus heal targets, healers dealing damage when idle | flee, CC, `rti`, focus heal | |
 | Combat | Hand-made lists for the 8 specs without a SimC profile (most healers, Protection Warrior, Vengeance) | class strategies | |
 | Pets | Hunter taming and pet management, warlock pets beyond the precombat summon, pet talents | `Tame`, pet strategies | |
 | Movement | Flight paths, following across maps on its own | `Taxi` | |
@@ -199,7 +200,7 @@ directly for Legion, so the comparison is by feature, not by file.
    project is public).
 2. **PvP**: own tactics for Eye of the Storm, Alterac Valley and Isle of Conquest (from AzerothCore), then Silvershard,
    Kotmogu, Seething Shore and Strand; arenas (skirmish fill, then tactics), duels.
-3. **Combat depth**: ground-effect dodge, crowd control, raid target icons, hand-made lists for the specs without a
+3. **Combat depth**: crowd control, raid target icons, hand-made lists for the specs without a
    SimC profile, healer damage, pets and hunter taming.
 4. **Dungeons and raids**: boss strategies for Legion dungeons, then raids; LFR and scenarios.
 5. **Character upkeep**: flight paths, vendors / repair / bank / mail / trade, consumables, bonus IDs and `Game.Patch`

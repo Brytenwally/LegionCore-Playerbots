@@ -99,6 +99,9 @@ PlayerbotAI::PlayerbotAI(ObjectGuid const& master, uint32 accountId, bool random
     // alt rule: looting changes a player's character (its bags), so alts loot only when ordered (nc +loot)
     if (!_randomBot)
         _nc.erase("loot");
+    // owner's rule (2026-11-13): avoiding ground effects is always on, whatever the configured default set;
+    // "co -avoidaoe" turns it off for one bot
+    _co.insert("avoidaoe");
     ApplyFlags();
 }
 
@@ -1553,6 +1556,14 @@ void PlayerbotAI::UpdateCombat(Player* bot)
             return;
     }
 
+    // a ground effect first: the flee move takes priority over the chase and the rotation (ACTION_EMERGENCY)
+    if (UpdateAvoidAoe(bot, enemy, role))
+    {
+        if (enemy && bot->getVictim() != enemy && role != BotRotations::CombatRole::Healer)
+            bot->Attack(enemy, role != BotRotations::CombatRole::Ranged);
+        return;
+    }
+
     if (enemy)
         Engage(bot, enemy, role);
     else if (_engaged)
@@ -1732,6 +1743,72 @@ Unit* PlayerbotAI::SelectTarget(Player* bot, std::vector<Player*> const& members
             _pullTarget.Clear();
     }
     return nullptr;
+}
+
+namespace
+{
+    uint32 const AvoidAoePointId = 0xA0E;                  // our flee move's point id
+    uint32 const AvoidAoeMoveMs = 3000;                     // a flee move longer than this is given up
+    uint32 const AvoidAoeCheckMs = 500;
+}
+
+// true while the flee move out of a ground effect is still on its way
+bool PlayerbotAI::AvoidingAoe(Player* bot) const
+{
+    return _avoidUntil && getMSTime() < _avoidUntil &&
+        bot->GetMotionMaster()->GetCurrentMovementGeneratorType() == POINT_MOTION_TYPE;
+}
+
+// mod-playerbots' AvoidAoeAction (ACTION_EMERGENCY in its "avoid aoe" strategy): in a fight, a bot standing in a
+// harmful ground effect steps out of it before chasing or casting. True while it moves (the caller skips the rest).
+bool PlayerbotAI::UpdateAvoidAoe(Player* bot, Unit* enemy, BotRotations::CombatRole role)
+{
+    if (!_avoidAoeOn || _selfBot || !bot->IsAlive() || bot->isInFlight() || bot->GetVehicle() ||
+        !(bot->isInCombat() || _groupInFight))
+    {
+        _avoidUntil = 0;
+        return false;
+    }
+
+    if (AvoidingAoe(bot))
+        return true;
+
+    uint32 const now = getMSTime();
+    _avoidUntil = 0;
+    if (getMSTimeDiff(_avoidCheckTime, now) < AvoidAoeCheckMs)
+        return false;
+    _avoidCheckTime = now;
+
+    BotAvoidAoe::Options const& options = sPlayerbotMgr->GetAvoidAoeOptions();
+    BotAvoidAoe::Hazard hazard;
+    if (!BotAvoidAoe::FindHazard(bot, options, hazard))
+        return false;
+
+    bool const melee = role == BotRotations::CombatRole::Tank || role == BotRotations::CombatRole::Melee;
+    Position pos;
+    if (!BotAvoidAoe::FindFleePosition(bot, enemy, melee, hazard, options, _fleeMemory, pos))
+        return false;
+
+    if (bot->IsNonMeleeSpellCast(false))
+        bot->InterruptNonMeleeSpells(false);
+    if (bot->HasAuraType(SPELL_AURA_MOUNTED) || _flying)
+        Dismount(bot);
+
+    MotionMaster* motion = bot->GetMotionMaster();
+    motion->Clear();
+    motion->MovePoint(AvoidAoePointId, pos, true);
+    _avoidUntil = now + AvoidAoeMoveMs;
+
+    std::string const name = BotAvoidAoe::SpellName(hazard.spellId);
+    if (sPlayerbotMgr->GetCombatLog() >= 1)
+        TC_LOG_INFO("server.loading", "[mod-playerbots] Bot '%s' avoids %s (%u, %s, radius %.1f).", bot->GetName(),
+            name.c_str(), hazard.spellId, hazard.kind, hazard.radius);
+    if (sPlayerbotMgr->GetAvoidAoeTell() && getMSTimeDiff(_avoidTellTime, now) > 10000)
+    {
+        _avoidTellTime = now;
+        Say(bot, _master, "I'm avoiding " + name + ".");
+    }
+    return true;
 }
 
 void PlayerbotAI::Engage(Player* bot, Unit* enemy, BotRotations::CombatRole role)
@@ -1979,7 +2056,7 @@ void PlayerbotAI::MoveToHealTarget(Player* bot, Player* healTarget)
         return;
     }
 
-    if (_stay || bot->IsNonMeleeSpellCast(false))
+    if (_stay || bot->IsNonMeleeSpellCast(false) || AvoidingAoe(bot))
         return;
 
     MotionMaster* motion = bot->GetMotionMaster();
@@ -2888,6 +2965,7 @@ namespace
         { "tank", "tank bots taunt and take enemies off the group" },
         { "defensives", "use defensive cooldowns when hurt" },
         { "potions", "drink potions from my bags when low" },
+        { "avoidaoe", "step out of harmful ground effects (on for every bot)" },
     };
     StrategyInfo const NonCombatStrategies[] =
     {
@@ -2912,6 +2990,7 @@ void PlayerbotAI::ApplyFlags()
     _playerTank = !_co.count("tank");
     _defensivesOn = _co.count("defensives") != 0;
     _potionsOn = _co.count("potions") != 0;
+    _avoidAoeOn = _co.count("avoidaoe") != 0;
     _stay = !_nc.count("follow");
     _lootCorpses = _nc.count("loot") != 0;
     _restOn = _nc.count("rest") != 0;

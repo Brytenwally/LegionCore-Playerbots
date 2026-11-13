@@ -15,6 +15,7 @@
 #include "BotFactory.h"
 #include "BotGear.h"
 #include "BotFormation.h"
+#include "BotAvoidAoe.h"
 #include "LFG.h"
 #include <atomic>
 #include <map>
@@ -88,6 +89,9 @@ public:
         uint32 aggressiveLevelsAbove = 6;
     };
     StrategyOptions const& GetStrategyOptions() const { return _strategy; }
+    // co avoidaoe: Playerbots.AvoidAoe.* (radius limit, step, never-avoided spells, whisper)
+    BotAvoidAoe::Options const& GetAvoidAoeOptions() const { return _avoidAoe; }
+    bool GetAvoidAoeTell() const { return _avoidAoeTell; }
 
     // ".playerbots self" (player's thread): turns the AI on or off for his own character; reply = what to tell him
     bool ToggleSelfBot(Player* player, std::string& reply);
@@ -368,6 +372,8 @@ private:
     std::string _defaultCo = "tank,defensives,potions";
     std::string _defaultNc = "follow,loot,rest,roll,autoequip,talents";
     StrategyOptions _strategy;
+    BotAvoidAoe::Options _avoidAoe;
+    bool _avoidAoeTell = false;
     std::map<ObjectGuid, Bot> _bots;                        // world thread only
     mutable std::mutex _aiLock;
     std::map<ObjectGuid, std::shared_ptr<PlayerbotAI>> _ais;  // written on the world thread, read from map threads

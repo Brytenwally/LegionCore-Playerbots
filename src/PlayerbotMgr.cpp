@@ -50,6 +50,25 @@ void PlayerbotMgr::LoadConfig()
     _loot.randomBotsRoll = sConfigMgr->GetBoolDefault("Playerbots.Loot.RandomBotsRoll", true);
     _defaultCo = sConfigMgr->GetStringDefault("Playerbots.Strategies.Combat", "tank,defensives,potions");
     _defaultNc = sConfigMgr->GetStringDefault("Playerbots.Strategies.NonCombat", "follow,loot,rest,roll,autoequip,talents");
+    _avoidAoe.maxRadius = std::max(1.0f, sConfigMgr->GetFloatDefault("Playerbots.AvoidAoe.MaxRadius", 15.0f));
+    _avoidAoe.maxStep = std::max(2.0f, sConfigMgr->GetFloatDefault("Playerbots.AvoidAoe.MaxStep", 8.0f));
+    _avoidAoeTell = sConfigMgr->GetBoolDefault("Playerbots.AvoidAoe.Tell", false);
+    _avoidAoe.whitelist.clear();
+    {
+        // mod-playerbots' AiPlayerbot.AoeAvoidSpellWhitelist: comma separated spell ids
+        std::string const list = sConfigMgr->GetStringDefault("Playerbots.AvoidAoe.Whitelist", "");
+        std::string number;
+        for (char c : list + ",")
+        {
+            if (c >= '0' && c <= '9')
+                number += c;
+            else if (!number.empty())
+            {
+                _avoidAoe.whitelist.insert(uint32(std::stoul(number)));
+                number.clear();
+            }
+        }
+    }
     _strategy.lootMinQuality = std::min<uint32>(sConfigMgr->GetIntDefault("Playerbots.Loot.MinQuality", 0), 7);
     _strategy.lootRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Loot.Range", 30.0f));
     _strategy.aggressiveRange = std::max(5.0f, sConfigMgr->GetFloatDefault("Playerbots.Aggressive.Range", 25.0f));

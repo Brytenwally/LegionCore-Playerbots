@@ -344,6 +344,8 @@ Playerbots.Sell.AutoGrayAlts = 0
 #        Combat:     aggressive (start fights with nearby enemies out of combat), passive (fight
 #                    nothing), defend (only what attacks the master or the bot), tank (tank bots
 #                    taunt), defensives, potions. aggressive / passive / defend exclude each other.
+#                    avoidaoe (step out of harmful ground effects) is always added, whatever this
+#                    list says; "co -avoidaoe" turns it off for one bot.
 #        Non-combat: follow (off = stay), loot (loot our kills' corpses; alt bots only by order),
 #                    rest (eat and drink), roll (need / greed on group loot; off = pass),
 #                    autoequip (bag upgrades), talents (fill empty talent rows).
@@ -351,6 +353,36 @@ Playerbots.Sell.AutoGrayAlts = 0
 
 Playerbots.Strategies.Combat = "tank,defensives,potions"
 Playerbots.Strategies.NonCombat = "follow,loot,rest,roll,autoequip,talents"
+
+#
+#    Playerbots.AvoidAoe.MaxRadius
+#        In a fight, bots step out of harmful ground effects (mod-playerbots' "avoid aoe"): enemy
+#        puddles and auras from dynamic objects, area triggers, damaging traps and invisible
+#        trigger creatures. Effects wider than this many yards are not avoided (they cover the room).
+#        Default: 15
+
+Playerbots.AvoidAoe.MaxRadius = 15
+
+#
+#    Playerbots.AvoidAoe.MaxStep
+#        Longest single step out of a ground effect, in yards.
+#        Default: 8
+
+Playerbots.AvoidAoe.MaxStep = 8
+
+#
+#    Playerbots.AvoidAoe.Whitelist
+#        Spell ids bots never step out of (soak mechanics, effects meant to be stood in), comma separated.
+#        Default: ""
+
+Playerbots.AvoidAoe.Whitelist = ""
+
+#
+#    Playerbots.AvoidAoe.Tell
+#        1 = a bot whispers its master "I'm avoiding <spell>." (at most every 10 seconds).
+#        Default: 0
+
+Playerbots.AvoidAoe.Tell = 0
 
 #
 #    Playerbots.Aggressive.Range

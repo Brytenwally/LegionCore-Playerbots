@@ -19,6 +19,7 @@
 #include "BotGear.h"
 #include "BotFormation.h"
 #include "BotApl.h"
+#include "BotAvoidAoe.h"
 #include "BotBattleground.h"
 #include "LFG.h"
 #include <map>
@@ -190,6 +191,16 @@ private:
     bool _restOn = true;                                    // nc rest
     bool _defensivesOn = true;                              // co defensives
     bool _potionsOn = true;                                 // co potions
+    bool _avoidAoeOn = true;                                // co avoidaoe
+
+    // co avoidaoe (mod-playerbots' "avoid aoe"): in a fight, step out of a harmful ground effect before
+    // anything else; while the flee move runs, chase, heal moves and the rotation wait
+    bool UpdateAvoidAoe(Player* bot, Unit* enemy, BotRotations::CombatRole role);
+    bool AvoidingAoe(Player* bot) const;
+    BotAvoidAoe::FleeMemory _fleeMemory;
+    uint32 _avoidUntil = 0;                                 // getMSTime() until which the flee move has priority
+    uint32 _avoidTellTime = 0;
+    uint32 _avoidCheckTime = 0;
     bool _rollOn = true;                                    // nc roll
     bool _autoEquipOn = true;                               // nc autoequip
     bool _talentsOn = true;                                 // nc talents

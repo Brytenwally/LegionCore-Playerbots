@@ -352,6 +352,29 @@ server** (see Status, 2026-11-05).
 - Not yet: tank threat bonus (owner: no), ground-effect dodge
   (AshamaneCore), pets, hunters' auto shot (talents and formations: see their sections).
 
+## Avoid AoE (2026-11-13, untested)
+
+Owner's request: mod-playerbots' "avoid aoe" strategy, always on. `src/combat/BotAvoidAoe.*` (reference
+`mod-playerbots/src/Ai/Base/Actions/MovementActions.cpp`, `AvoidAoeAction`, `BestPositionFor{Melee,Ranged}ToFlee`, `FleePosition`,
+`CheckLastFlee`; values "area debuff", "nearest trap with damage", "possible triggers").
+- Strategy `avoidaoe` in the combat set, **added to every bot at construction whatever `Playerbots.Strategies.Combat` says**
+  (owner's rule: always on); `co -avoidaoe` turns it off for one bot. Not for self-bots (the player moves himself).
+- `PlayerbotAI::UpdateAvoidAoe` in `UpdateCombat` (bot or group fighting), before `Engage` and the rotation (mod-playerbots runs it
+  as `ACTION_EMERGENCY`); a hazard check every 500 ms. Hazards in order: (1) a negative aura on the bot from a hostile
+  `DynamicObject` (centre and radius of the object); (2) **Legion**: a hostile `AreaTrigger` of a negative spell the bot is in
+  (`IsInArea`; round shapes only, boxes / polygons skipped); (3) a hostile trap object whose spell deals damage (`trap.radius` +
+  combat reach; Legion's field is a radius, 3.3.5's a diameter); (4) an unselectable unfriendly creature with a periodic trigger
+  aura whose triggered spell has `SPELL_EFFECT_SCHOOL_DAMAGE` within its radius. Wider than `Playerbots.AvoidAoe.MaxRadius` (15)
+  or in `Playerbots.AvoidAoe.Whitelist`: ignored.
+- Flee position: mod-playerbots' angles (melee: left / right of the target, towards it if still in reach, backwards when tanking;
+  ranged: left / right, away / towards the target keeping 5-30 yd, away from the centre), refusing a direction opposite to one
+  taken in the last 5 s (`FleeMemory`); step = what leaves the circle, at most `Playerbots.AvoidAoe.MaxStep` (8);
+  `GetFirstCollisionPosition` and line of sight; out of the hazard wins, then farthest from its centre. `MovePoint` with
+  pathfinding (point id 0xA0E); a cast is interrupted, a mount dropped. While that move runs (3 s at most) `UpdateCombat` returns
+  before chase / rotation and `MoveToHealTarget` waits (`AvoidingAoe`). Log `Bot 'X' avoids <spell> (id, kind, radius r).`;
+  `Playerbots.AvoidAoe.Tell = 1` whispers the master (10 s apart).
+- Not ported: AzerothCore's per-dungeon AoE multipliers and its "combat formation move".
+
 ## Created bots, talents and gear (2026-11-05, untested)
 
 Owner's request: `.playerbots create <class> [spec]` for easier testing; a created bot is at the
